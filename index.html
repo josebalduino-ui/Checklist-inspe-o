@@ -50,7 +50,6 @@
           <button id="logoutBtn" class="secondary-btn">Sair</button>
           <button id="exportCsvBtn" class="secondary-btn">Exportar CSV</button>
           <button id="exportPdfBtn" class="secondary-btn">Exportar PDF</button>
-          <button id="salvarChecklist" class="primary-btn">Salvar inspeção</button>
         </div>
       </header>
 
@@ -104,7 +103,46 @@
               <input type="text" id="novoVeiculo" placeholder="Adicionar novo veículo" />
             </div>
             <button type="button" id="adicionarVeiculo" class="ghost-btn">Adicionar veículo</button>
+            <button type="button" id="cancelarEdicaoVeiculo" class="secondary-btn hidden">Cancelar</button>
           </div>
+        </div>
+      </section>
+
+      <section class="panel management-panel">
+        <div class="section-header">
+          <h2>Gerenciar usuários e veículos</h2>
+          <span class="badge badge-neutral">Cadastros</span>
+        </div>
+        <div class="management-grid">
+          <section id="userManagement" class="management-column hidden">
+            <h3>Usuários</h3>
+            <form id="userEditForm" class="management-form hidden">
+              <label>
+                <span>Nome de usuário</span>
+                <input type="text" id="editUsername" required />
+              </label>
+              <label>
+                <span>Nova senha (opcional)</span>
+                <input type="password" id="editUserPassword" autocomplete="new-password" />
+              </label>
+              <label>
+                <span>Perfil</span>
+                <select id="editUserRole">
+                  <option value="operador">Operador</option>
+                  <option value="admin">Administrador</option>
+                </select>
+              </label>
+              <div class="management-actions">
+                <button type="submit" class="primary-btn">Salvar alterações</button>
+                <button type="button" id="cancelarEdicaoUsuario" class="secondary-btn">Cancelar</button>
+              </div>
+            </form>
+            <div id="userList" class="record-list"></div>
+          </section>
+          <section class="management-column">
+            <h3>Veículos</h3>
+            <div id="vehicleList" class="record-list"></div>
+          </section>
         </div>
       </section>
 
@@ -170,6 +208,10 @@
           </div>
         </div>
       </section>
+
+      <div class="inspection-actions">
+        <button id="salvarChecklist" class="primary-btn">Salvar alterações</button>
+      </div>
 
       <section class="panel custom-item-panel">
         <div class="section-header">

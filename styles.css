@@ -221,6 +221,7 @@ button {
 }
 
 input[type="text"],
+input[type="password"],
 input[type="date"],
 select,
 textarea {
@@ -310,6 +311,74 @@ textarea {
 
 .vehicle-input-wrap {
   flex: 1;
+}
+
+.management-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+}
+
+.management-column h3 {
+  margin: 0 0 14px;
+}
+
+.management-form {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #f8faff;
+}
+
+.management-actions,
+.record-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.record-list {
+  display: grid;
+  gap: 10px;
+}
+
+.record-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #f9fbff;
+}
+
+.record-row small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+}
+
+.small-btn {
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--primary);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.danger-btn {
+  color: var(--danger);
+}
+
+.empty-list {
+  color: var(--muted);
+  font-size: 0.9rem;
 }
 
 .filter-bar {
@@ -557,6 +626,12 @@ textarea {
   background: linear-gradient(135deg, rgba(30, 154, 90, 0.04), rgba(47, 111, 237, 0.04));
 }
 
+.inspection-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin: -8px 0 24px;
+}
+
 .custom-item-form {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -702,6 +777,10 @@ textarea {
   .summary-grid {
     grid-template-columns: repeat(2, minmax(160px, 1fr));
   }
+
+  .management-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media print {
@@ -728,9 +807,22 @@ textarea {
 @media (max-width: 640px) {
   .topbar,
   .section-header,
-  .item-header {
+  .item-header,
+  .record-row {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .record-actions {
+    width: 100%;
+  }
+
+  .inspection-actions {
+    justify-content: stretch;
+  }
+
+  .inspection-actions .primary-btn {
+    width: 100%;
   }
 
   .summary-grid {

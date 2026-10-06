@@ -45,7 +45,9 @@ const rnfItems = [
 const appState = {
   photos: {},
   currentFilter: 'todos',
-  vehicles: getStoredVehicles()
+  vehicles: getStoredVehicles(),
+  editingVehicle: null,
+  editingUsername: null
 };
 
 function getStoredVehicles() {
@@ -97,8 +99,20 @@ const exportCsvBtn = document.getElementById('exportCsvBtn');
 const veiculoSelect = document.getElementById('veiculoSelect');
 const novoVeiculoInput = document.getElementById('novoVeiculo');
 const adicionarVeiculoBtn = document.getElementById('adicionarVeiculo');
+const vehicleList = document.getElementById('vehicleList');
+const userList = document.getElementById('userList');
 const historyList = document.getElementById('historyList');
 const auditList = document.getElementById('auditList');
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, character => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  })[character]);
+}
 
 function getStatusLabel(value) {
   switch (value) {
@@ -344,7 +358,161 @@ function addCustomItem() {
 
 function populateVehicleOptions() {
   veiculoSelect.innerHTML = '<option value="">Selecione um veículo</option>' +
-    appState.vehicles.map(vehicle => `<option value="${vehicle}">${vehicle}</option>`).join('');
+    appState.vehicles.map(vehicle => `<option value="${escapeHtml(vehicle)}">${escapeHtml(vehicle)}</option>`).join('');
+  renderVehicleList();
+}
+
+function renderVehicleList() {
+  if (!appState.vehicles.length) {
+    vehicleList.innerHTML = '<p class="empty-list">Nenhum veículo cadastrado.</p>';
+    return;
+  }
+
+  vehicleList.innerHTML = appState.vehicles.map((vehicle, index) => `
+    <div class="record-row">
+      <span>${escapeHtml(vehicle)}</span>
+      <div class="record-actions">
+        <button type="button" class="small-btn" data-action="edit-vehicle" data-index="${index}">Editar</button>
+        <button type="button" class="small-btn danger-btn" data-action="delete-vehicle" data-index="${index}">Apagar</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function renderUserList() {
+  const users = getUsers();
+  userList.innerHTML = users.map(user => `
+    <div class="record-row">
+      <span>${escapeHtml(user.username)} <small>${user.perfil === 'admin' ? 'Administrador' : 'Operador'}</small></span>
+      <div class="record-actions">
+        <button type="button" class="small-btn" data-action="edit-user" data-username="${encodeURIComponent(user.username)}">Editar</button>
+        <button type="button" class="small-btn danger-btn" data-action="delete-user" data-username="${encodeURIComponent(user.username)}">Apagar</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function startUserEdit(username) {
+  const user = getUsers().find(item => item.username === username);
+  if (!user) return;
+
+  appState.editingUsername = user.username;
+  document.getElementById('editUsername').value = user.username;
+  document.getElementById('editUserPassword').value = '';
+  document.getElementById('editUserRole').value = user.perfil;
+  document.getElementById('userEditForm').classList.remove('hidden');
+  document.getElementById('editUsername').focus();
+}
+
+function resetUserEdit() {
+  appState.editingUsername = null;
+  document.getElementById('userEditForm').reset();
+  document.getElementById('userEditForm').classList.add('hidden');
+}
+
+function saveUserChanges(event) {
+  event.preventDefault();
+  const users = getUsers();
+  const originalUsername = appState.editingUsername;
+  const username = document.getElementById('editUsername').value.trim();
+  const password = document.getElementById('editUserPassword').value;
+  const perfil = document.getElementById('editUserRole').value;
+  const userIndex = users.findIndex(user => user.username === originalUsername);
+
+  if (userIndex < 0 || !username) return;
+  if (users.some((user, index) => index !== userIndex && user.username.toLowerCase() === username.toLowerCase())) {
+    alert('Esse nome de usuário já está em uso.');
+    return;
+  }
+
+  users[userIndex] = { ...users[userIndex], username, perfil };
+  if (password) users[userIndex].password = password;
+  localStorage.setItem(STORAGE_KEYS.users, JSON.stringify(users));
+
+  const currentUser = getCurrentUser();
+  if (currentUser && currentUser.username === originalUsername) {
+    localStorage.setItem(STORAGE_KEYS.currentUser, JSON.stringify({
+      ...currentUser,
+      username,
+      password: password || currentUser.password,
+      perfil
+    }));
+    ensureSession();
+  }
+
+  saveAuditEntry('usuario_editado', { description: `Usuário ${originalUsername} editado` });
+  resetUserEdit();
+  renderUserList();
+}
+
+function deleteUser(username) {
+  const currentUser = getCurrentUser();
+  if (currentUser?.username === username) {
+    alert('Não é possível apagar o usuário conectado.');
+    return;
+  }
+
+  const users = getUsers();
+  const user = users.find(item => item.username === username);
+  if (!user) return;
+  const adminCount = users.filter(item => item.perfil === 'admin').length;
+  if (user.perfil === 'admin' && adminCount <= 1) {
+    alert('Não é possível apagar o último administrador.');
+    return;
+  }
+  if (!window.confirm(`Apagar o usuário "${username}"?`)) return;
+
+  localStorage.setItem(STORAGE_KEYS.users, JSON.stringify(users.filter(item => item.username !== username)));
+  saveAuditEntry('usuario_apagado', { description: `Usuário ${username} apagado` });
+  renderUserList();
+  if (appState.editingUsername === username) resetUserEdit();
+}
+
+function updateVehicle(value) {
+  const editingVehicle = appState.editingVehicle;
+  if (editingVehicle !== null) {
+    const duplicate = appState.vehicles.some((vehicle, index) => index !== editingVehicle && vehicle.toLowerCase() === value.toLowerCase());
+    if (duplicate) {
+      alert('Esse veículo já está cadastrado.');
+      return;
+    }
+
+    const oldName = appState.vehicles[editingVehicle];
+    appState.vehicles[editingVehicle] = value;
+    if (veiculoSelect.value === oldName) veiculoSelect.value = value;
+    saveAuditEntry('veiculo_editado', { description: `Veículo ${oldName} alterado para ${value}` });
+    finishVehicleEdit();
+  } else if (appState.vehicles.some(vehicle => vehicle.toLowerCase() === value.toLowerCase())) {
+    alert('Esse veículo já está cadastrado.');
+    return;
+  } else {
+    appState.vehicles.push(value);
+    veiculoSelect.value = value;
+  }
+
+  localStorage.setItem('checklist-vehicles-v1', JSON.stringify(appState.vehicles));
+  populateVehicleOptions();
+  if (appState.vehicles.includes(value)) veiculoSelect.value = value;
+}
+
+function finishVehicleEdit() {
+  appState.editingVehicle = null;
+  novoVeiculoInput.value = '';
+  adicionarVeiculoBtn.textContent = 'Adicionar veículo';
+  document.getElementById('cancelarEdicaoVeiculo').classList.add('hidden');
+}
+
+function deleteVehicle(index) {
+  const vehicle = appState.vehicles[index];
+  if (!vehicle || !window.confirm(`Apagar o veículo "${vehicle}"?`)) return;
+
+  appState.vehicles.splice(index, 1);
+  if (veiculoSelect.value === vehicle) veiculoSelect.value = '';
+  if (appState.editingVehicle === index) finishVehicleEdit();
+  else if (appState.editingVehicle > index) appState.editingVehicle -= 1;
+  localStorage.setItem('checklist-vehicles-v1', JSON.stringify(appState.vehicles));
+  populateVehicleOptions();
+  saveAuditEntry('veiculo_apagado', { description: `Veículo ${vehicle} apagado` });
 }
 
 function addVehicle() {
@@ -354,18 +522,9 @@ function addVehicle() {
     return;
   }
 
-  if (!appState.vehicles.includes(value)) {
-    appState.vehicles.push(value);
-    localStorage.setItem('checklist-vehicles-v1', JSON.stringify(appState.vehicles));
-    populateVehicleOptions();
-    veiculoSelect.value = value;
-    alert('Veículo adicionado com sucesso!');
-  } else {
-    veiculoSelect.value = value;
-    alert('Esse veículo já está cadastrado.');
-  }
-
-  novoVeiculoInput.value = '';
+  const wasEditing = appState.editingVehicle !== null;
+  updateVehicle(value);
+  if (!appState.editingVehicle && !wasEditing) novoVeiculoInput.value = '';
 }
 
 function getHistory() {
@@ -435,7 +594,7 @@ function getAuditText(entry) {
     return `Relatório ${entry.details.isNew ? 'criado' : 'alterado'} por ${entry.details.user} em ${new Date(entry.details.timestamp).toLocaleString('pt-BR')}`;
   }
 
-  return 'Registro do sistema';
+  return entry.details.description || 'Registro do sistema';
 }
 
 function renderAuditLog() {
@@ -662,6 +821,8 @@ function ensureSession() {
     authPanel.classList.add('hidden');
     appContent.classList.remove('hidden');
     updateUserBadge();
+    document.getElementById('userManagement').classList.toggle('hidden', currentUser.perfil !== 'admin');
+    if (currentUser.perfil === 'admin') renderUserList();
   } else {
     authPanel.classList.remove('hidden');
     appContent.classList.add('hidden');
@@ -705,6 +866,7 @@ function bindAuthEvents() {
 }
 
 adicionarVeiculoBtn.addEventListener('click', addVehicle);
+document.getElementById('cancelarEdicaoVeiculo').addEventListener('click', finishVehicleEdit);
 novoVeiculoInput.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {
     event.preventDefault();
@@ -712,10 +874,39 @@ novoVeiculoInput.addEventListener('keydown', (event) => {
   }
 });
 
+vehicleList.addEventListener('click', event => {
+  const button = event.target.closest('button[data-action]');
+  if (!button) return;
+
+  const index = Number(button.dataset.index);
+  if (button.dataset.action === 'edit-vehicle') {
+    appState.editingVehicle = index;
+    novoVeiculoInput.value = appState.vehicles[index];
+    adicionarVeiculoBtn.textContent = 'Salvar veículo';
+    document.getElementById('cancelarEdicaoVeiculo').classList.remove('hidden');
+    novoVeiculoInput.focus();
+  } else if (button.dataset.action === 'delete-vehicle') {
+    deleteVehicle(index);
+  }
+});
+
+userList.addEventListener('click', event => {
+  const button = event.target.closest('button[data-action]');
+  if (!button) return;
+
+  const username = decodeURIComponent(button.dataset.username);
+  if (button.dataset.action === 'edit-user') startUserEdit(username);
+  else if (button.dataset.action === 'delete-user') deleteUser(username);
+});
+
+document.getElementById('userEditForm').addEventListener('submit', saveUserChanges);
+document.getElementById('cancelarEdicaoUsuario').addEventListener('click', resetUserEdit);
+
 populateVehicleOptions();
 renderChecklist(rfList, rfItems, 'RF');
 renderRnfChecklist();
 renderHistory();
+renderAuditLog();
 bindRadioEvents();
 updateSummary();
 loadSavedInspection();
