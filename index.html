@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Checklist de Inspeção</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="authPanel" class="auth-shell">
+      <div class="auth-card">
+        <p class="eyebrow auth-eyebrow">Acesso ao sistema</p>
+        <h2>Checklist de inspeção</h2>
+
+        <div class="auth-tabs">
+          <button type="button" class="auth-tab active" data-mode="login">Login</button>
+          <button type="button" class="auth-tab" data-mode="register">Cadastrar</button>
+        </div>
+
+        <form id="authForm" class="auth-form">
+          <label>
+            <span>Usuário</span>
+            <input type="text" id="authUsuario" placeholder="Digite seu usuário" required />
+          </label>
+          <label>
+            <span>Senha</span>
+            <input type="password" id="authSenha" placeholder="Digite sua senha" required />
+          </label>
+          <label id="roleField" class="hidden">
+            <span>Perfil</span>
+            <select id="authPerfil">
+              <option value="operador">Operador</option>
+              <option value="admin">Administrador</option>
+            </select>
+          </label>
+          <button type="submit" class="primary-btn auth-submit">Entrar</button>
+        </form>
+        <p id="authMessage" class="auth-message"></p>
+      </div>
+    </div>
+
+    <div id="appContent" class="container hidden">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Operação / Manutenção / Segurança</p>
+          <h1>Checklist de Inspeção</h1>
+        </div>
+        <div class="header-actions">
+          <div class="user-badge" id="userBadge">Usuário</div>
+          <button id="logoutBtn" class="secondary-btn">Sair</button>
+          <button id="exportCsvBtn" class="secondary-btn">Exportar CSV</button>
+          <button id="exportPdfBtn" class="secondary-btn">Exportar PDF</button>
+          <button id="salvarChecklist" class="primary-btn">Salvar inspeção</button>
+        </div>
+      </header>
+
+      <section class="summary-panel panel">
+        <div class="summary-grid">
+          <div class="stat-box stat-green">
+            <span>Total</span>
+            <strong id="totalItens">0</strong>
+          </div>
+          <div class="stat-box stat-blue">
+            <span>Conformes</span>
+            <strong id="itensConformes">0</strong>
+          </div>
+          <div class="stat-box stat-red">
+            <span>Não conformes</span>
+            <strong id="itensNaoConformes">0</strong>
+          </div>
+          <div class="stat-box stat-gold">
+            <span>Aptidão</span>
+            <strong id="statusRodar">Apto</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel form-panel">
+        <div class="form-grid">
+          <label>
+            <span>Veículo</span>
+            <select id="veiculoSelect">
+              <option value="">Selecione um veículo</option>
+            </select>
+          </label>
+          <label>
+            <span>Equipamento</span>
+            <input type="text" id="equipamento" placeholder="Ex.: Caminhão 01" />
+          </label>
+          <label>
+            <span>Placa</span>
+            <input type="text" id="placa" placeholder="Ex.: ABC-1234" />
+          </label>
+          <label>
+            <span>Data</span>
+            <input type="date" id="dataInspecao" />
+          </label>
+          <label>
+            <span>Responsável</span>
+            <input type="text" id="responsavel" placeholder="Nome do operador" />
+          </label>
+          <div class="inline-actions vehicle-box">
+            <div class="vehicle-input-wrap">
+              <input type="text" id="novoVeiculo" placeholder="Adicionar novo veículo" />
+            </div>
+            <button type="button" id="adicionarVeiculo" class="ghost-btn">Adicionar veículo</button>
+          </div>
+        </div>
+      </section>
+
+      <main class="content-grid">
+        <section class="panel checklist-panel">
+          <div class="section-header">
+            <div>
+              <h2>Requisitos Funcionais</h2>
+              <p class="section-subtitle">Selecione uma categoria para filtrar os itens</p>
+            </div>
+            <span class="badge badge-blue">RF</span>
+          </div>
+
+          <div class="filter-bar" id="filterBar">
+            <button class="filter-btn active" data-filter="todos">Todos</button>
+            <button class="filter-btn" data-filter="operacao">Operação</button>
+            <button class="filter-btn" data-filter="manutencao">Manutenção</button>
+            <button class="filter-btn" data-filter="seguranca">Segurança</button>
+          </div>
+
+          <div id="rfList" class="checklist"></div>
+        </section>
+
+        <aside class="panel checklist-panel">
+          <div class="section-header">
+            <h2>Requisitos Não Funcionais</h2>
+            <span class="badge badge-purple">RNF</span>
+          </div>
+          <div id="rnfList" class="checklist compact"></div>
+        </aside>
+      </main>
+
+      <section class="panel result-panel">
+        <div class="section-header">
+          <h2>Resumo da inspeção</h2>
+          <span id="resultBadge" class="status-pill status-apto">Apto para rodar</span>
+        </div>
+
+        <div class="result-grid">
+          <label>
+            <span>Não conformidade observada</span>
+            <textarea id="naoConformidade" rows="4" placeholder="Descreva o problema encontrado..."></textarea>
+          </label>
+
+          <label>
+            <span>Ordem de serviço</span>
+            <select id="ordemServico">
+              <option value="nao">Não necessária</option>
+              <option value="sim">Necessária</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="result-grid single-line">
+          <div class="read-only-box">
+            <span>Aptidão para rodar</span>
+            <strong id="aptidaoSistema">Apto</strong>
+          </div>
+
+          <div class="read-only-box">
+            <span>Observações</span>
+            <strong id="observacoesSistema">Sem pendências</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel custom-item-panel">
+        <div class="section-header">
+          <h2>Adicionar item de inspeção</h2>
+          <span class="badge badge-neutral">Personalizar</span>
+        </div>
+        <div class="custom-item-form">
+          <label>
+            <span>Nome do item</span>
+            <input type="text" id="customItemName" placeholder="Ex.: Estado da bateria" />
+          </label>
+          <label>
+            <span>Categoria</span>
+            <select id="customItemCategory">
+              <option value="operacao">Operação</option>
+              <option value="manutencao">Manutenção</option>
+              <option value="seguranca">Segurança</option>
+            </select>
+          </label>
+          <label>
+            <span>Descrição</span>
+            <input type="text" id="customItemDescription" placeholder="Descreva o que será verificado" />
+          </label>
+          <button id="adicionarItemChecklist" class="primary-btn">Adicionar item</button>
+        </div>
+      </section>
+
+      <section class="panel history-panel">
+        <div class="section-header">
+          <h2>Histórico de inspeções</h2>
+          <span class="badge badge-neutral">Registros</span>
+        </div>
+        <div id="historyList" class="history-list"></div>
+      </section>
+    </div>
+
+    <script src="script.js"></script>
+  </body>
+</html>
