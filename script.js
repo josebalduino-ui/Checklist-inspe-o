@@ -27,7 +27,8 @@ const STORAGE_KEYS = {
   users: 'checklist-users-v1',
   currentUser: 'checklist-current-user-v1',
   customItems: 'checklist-custom-items-v1',
-  history: 'checklist-historico'
+  history: 'checklist-historico',
+  audit: 'checklist-audit-v1'
 };
 
 const rnfItems = [
@@ -97,6 +98,7 @@ const veiculoSelect = document.getElementById('veiculoSelect');
 const novoVeiculoInput = document.getElementById('novoVeiculo');
 const adicionarVeiculoBtn = document.getElementById('adicionarVeiculo');
 const historyList = document.getElementById('historyList');
+const auditList = document.getElementById('auditList');
 
 function getStatusLabel(value) {
   switch (value) {
@@ -377,6 +379,28 @@ function saveHistory(entry) {
   localStorage.setItem(STORAGE_KEYS.history, JSON.stringify(history));
 }
 
+function getAuditLog() {
+  const raw = localStorage.getItem(STORAGE_KEYS.audit);
+  return raw ? JSON.parse(raw) : [];
+}
+
+function saveAuditEntry(action, details = {}) {
+  const currentUser = getCurrentUser();
+  const auditEntry = {
+    id: Date.now() + Math.random(),
+    action,
+    user: currentUser ? currentUser.username : 'Sistema',
+    perfil: currentUser ? currentUser.perfil : 'sistema',
+    timestamp: new Date().toISOString(),
+    details
+  };
+
+  const log = getAuditLog();
+  log.unshift(auditEntry);
+  localStorage.setItem(STORAGE_KEYS.audit, JSON.stringify(log.slice(0, 50)));
+  renderAuditLog();
+}
+
 function renderHistory() {
   const history = getHistory();
 
@@ -392,6 +416,43 @@ function renderHistory() {
         <div class="history-meta">${item.dataInspecao || 'Sem data'} • ${item.responsavel || 'Sem responsável'} • ${item.placa || 'Sem placa'}</div>
       </div>
       <span class="history-status ${item.aptidaoSistema === 'Apto' ? 'apto' : 'nao-apto'}">${item.aptidaoSistema || 'Apto'}</span>
+    </div>
+  `).join('');
+}
+
+function getAuditText(entry) {
+  if (!entry.details) return 'Registro do sistema';
+
+  if (entry.action === 'login') {
+    return `Login em ${new Date(entry.details.loginAt).toLocaleString('pt-BR')}`;
+  }
+
+  if (entry.action === 'logout') {
+    return `Logout em ${new Date(entry.details.logoutAt).toLocaleString('pt-BR')}`;
+  }
+
+  if (entry.action === 'relatorio_salvo') {
+    return `Relatório ${entry.details.isNew ? 'criado' : 'alterado'} por ${entry.details.user} em ${new Date(entry.details.timestamp).toLocaleString('pt-BR')}`;
+  }
+
+  return 'Registro do sistema';
+}
+
+function renderAuditLog() {
+  const audit = getAuditLog();
+
+  if (!audit.length) {
+    auditList.innerHTML = '<div class="audit-item"><div><strong>Sem auditoria</strong><div class="audit-meta">Ainda não houve login, logout ou alteração.</div></div></div>';
+    return;
+  }
+
+  auditList.innerHTML = audit.map(entry => `
+    <div class="audit-item">
+      <div>
+        <strong>${entry.user}</strong>
+        <div class="audit-meta">${new Date(entry.timestamp).toLocaleString('pt-BR')} • ${getAuditText(entry)}</div>
+      </div>
+      <span class="audit-tag">${entry.action}</span>
     </div>
   `).join('');
 }
@@ -427,6 +488,10 @@ function exportCsv() {
 }
 
 function saveInspection() {
+  const currentUser = getCurrentUser();
+  const now = new Date().toISOString();
+  const existing = JSON.parse(localStorage.getItem('checklist-inspecao-v2') || 'null');
+
   const payload = {
     veiculo: veiculoSelect.value,
     equipamento: document.getElementById('equipamento').value,
@@ -436,7 +501,13 @@ function saveInspection() {
     naoConformidade: document.getElementById('naoConformidade').value,
     ordemServico: document.getElementById('ordemServico').value,
     aptidaoSistema: aptidaoSistema.textContent,
-    respostas: {}
+    respostas: {},
+    createdBy: existing?.createdBy || (currentUser ? currentUser.username : 'Sistema'),
+    createdAt: existing?.createdAt || now,
+    updatedBy: currentUser ? currentUser.username : 'Sistema',
+    updatedAt: now,
+    loginAt: currentUser ? currentUser.loginAt || null : null,
+    logoutAt: currentUser ? currentUser.logoutAt || null : null
   };
 
   document.querySelectorAll('input[type="radio"]').forEach(radio => {
@@ -448,6 +519,11 @@ function saveInspection() {
   payload.fotos = appState.photos;
   saveHistory(payload);
   localStorage.setItem('checklist-inspecao-v2', JSON.stringify(payload));
+  saveAuditEntry('relatorio_salvo', {
+    user: payload.updatedBy,
+    timestamp: now,
+    isNew: !existing
+  });
   renderHistory();
   alert('Inspeção salva com sucesso!');
 }
@@ -513,14 +589,27 @@ function authMessage(text, isError = false) {
   el.style.color = isError ? '#d92d4d' : '#1e9a5a';
 }
 
+function getCurrentUser() {
+  const raw = localStorage.getItem(STORAGE_KEYS.currentUser);
+  return raw ? JSON.parse(raw) : null;
+}
+
 function loginUser(username, password) {
   const users = getUsers();
   const user = users.find(item => item.username.toLowerCase() === username.toLowerCase() && item.password === password);
   if (!user) {
     return null;
   }
-  localStorage.setItem(STORAGE_KEYS.currentUser, JSON.stringify(user));
-  return user;
+
+  const userSession = {
+    ...user,
+    loginAt: new Date().toISOString(),
+    logoutAt: null
+  };
+
+  localStorage.setItem(STORAGE_KEYS.currentUser, JSON.stringify(userSession));
+  saveAuditEntry('login', { loginAt: userSession.loginAt });
+  return userSession;
 }
 
 function registerUser(username, password, perfil) {
@@ -543,6 +632,19 @@ function updateUserBadge() {
 }
 
 function logoutUser() {
+  const currentUser = getCurrentUser();
+  const logoutAt = new Date().toISOString();
+
+  if (currentUser) {
+    const updatedUser = {
+      ...currentUser,
+      logoutAt,
+      lastSession: currentUser.loginAt || null
+    };
+    localStorage.setItem(STORAGE_KEYS.currentUser, JSON.stringify(updatedUser));
+    saveAuditEntry('logout', { logoutAt, loginAt: currentUser.loginAt || null });
+  }
+
   localStorage.removeItem(STORAGE_KEYS.currentUser);
   document.getElementById('appContent').classList.add('hidden');
   document.getElementById('authPanel').classList.remove('hidden');

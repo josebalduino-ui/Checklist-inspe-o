@@ -35,8 +35,8 @@
 | Categoria | Classificação | Exemplo |
 |---|---|---|
 | Usabilidade | RNF | O sistema deve ser simples de utilizar pelo operador em campo |
-| Desempenho | RNF | O sistema deve registrar uma resposta em até X segundos |
-| Disponibilidade | RNF | O sistema deve estar disponível X% do tempo |
+| Desempenho | RNF | O sistema deve registrar uma resposta em até 2 segundos |
+| Disponibilidade | RNF | O sistema deve restabelecer a disponibilidade em até 5 segundos após uma falha |
 | Segurança | RNF | Somente usuários autorizados podem alterar uma inspeção concluída |
 | Rastreabilidade | RNF | O sistema deve registrar usuário, data e hora das alterações |
 | Operação offline | RNF | O sistema deve permitir inspeções sem conexão e sincronizar posteriormente |

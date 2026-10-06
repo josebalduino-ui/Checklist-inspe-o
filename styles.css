@@ -617,12 +617,14 @@ textarea {
   color: var(--danger);
 }
 
-.history-list {
+.history-list,
+.audit-list {
   display: grid;
   gap: 12px;
 }
 
-.history-item {
+.history-item,
+.audit-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -659,6 +661,37 @@ textarea {
 .history-status.nao-apto {
   background: var(--danger-soft);
   color: var(--danger);
+}
+
+.audit-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #f9fbff;
+  padding: 14px 16px;
+}
+
+.audit-item strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.audit-meta {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.audit-tag {
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #edf4ff;
+  color: var(--primary);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
 }
 
 @media (max-width: 900px) {
