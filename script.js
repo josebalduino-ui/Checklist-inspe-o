@@ -92,6 +92,8 @@ const itensNaoConformes = document.getElementById('itensNaoConformes');
 const statusRodar = document.getElementById('statusRodar');
 const aptidaoSistema = document.getElementById('aptidaoSistema');
 const observacoesSistema = document.getElementById('observacoesSistema');
+const itensNaoAptos = document.getElementById('itensNaoAptos');
+const itensAtencao = document.getElementById('itensAtencao');
 const resultBadge = document.getElementById('resultBadge');
 const salvarChecklistBtn = document.getElementById('salvarChecklist');
 const exportPdfBtn = document.getElementById('exportPdfBtn');
@@ -103,6 +105,7 @@ const vehicleList = document.getElementById('vehicleList');
 const userList = document.getElementById('userList');
 const historyList = document.getElementById('historyList');
 const auditList = document.getElementById('auditList');
+let reportPdfObjectUrl = null;
 
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, character => ({
@@ -120,6 +123,8 @@ function getStatusLabel(value) {
       return 'Conforme';
     case 'nao-conforme':
       return 'Não conforme';
+    case 'apto-ressalvas':
+      return 'Apto com ressalvas';
     case 'n-a':
       return 'N/A';
     default:
@@ -133,6 +138,8 @@ function getStatusClass(value) {
       return 'conforme';
     case 'nao-conforme':
       return 'nao-conforme';
+    case 'apto-ressalvas':
+      return 'apto-ressalvas';
     case 'n-a':
       return 'n-a';
     default:
@@ -170,6 +177,10 @@ function renderChecklist(listEl, items, type) {
             <input type="radio" name="${item.id}" value="nao-conforme" />
             Não conforme
           </label>
+          <label class="option apto-ressalvas" data-status="apto-ressalvas">
+            <input type="radio" name="${item.id}" value="apto-ressalvas" />
+            Apto com ressalvas
+          </label>
           <label class="option n-a" data-status="n-a">
             <input type="radio" name="${item.id}" value="n-a" />
             N/A
@@ -206,6 +217,10 @@ function renderRnfChecklist() {
             <input type="radio" name="${item.id}" value="nao-conforme" />
             Não conforme
           </label>
+          <label class="option apto-ressalvas" data-status="apto-ressalvas">
+            <input type="radio" name="${item.id}" value="apto-ressalvas" />
+            Apto com ressalvas
+          </label>
           <label class="option n-a" data-status="n-a">
             <input type="radio" name="${item.id}" value="n-a" />
             N/A
@@ -218,13 +233,13 @@ function renderRnfChecklist() {
 
 function updateItemVisual(itemCard, value) {
   const statusClass = getStatusClass(value);
-  itemCard.classList.remove('conforme', 'nao-conforme', 'n-a');
+  itemCard.classList.remove('conforme', 'nao-conforme', 'n-a', 'apto-ressalvas');
   itemCard.classList.add(statusClass);
 
   const badge = itemCard.querySelector('.status-badge');
   badge.textContent = getStatusLabel(value);
-  badge.classList.remove('status-conforme', 'status-nao-conforme', 'status-n-a');
-  badge.classList.add(value === 'nao-conforme' ? 'status-nao-conforme' : value === 'n-a' ? 'status-n-a' : 'status-conforme');
+  badge.classList.remove('status-conforme', 'status-nao-conforme', 'status-n-a', 'status-apto-ressalvas');
+  badge.classList.add(value === 'nao-conforme' ? 'status-nao-conforme' : value === 'n-a' ? 'status-n-a' : value === 'apto-ressalvas' ? 'status-apto-ressalvas' : 'status-conforme');
 
   itemCard.querySelectorAll('.option').forEach(option => {
     option.classList.toggle('selected', option.dataset.status === value);
@@ -232,31 +247,49 @@ function updateItemVisual(itemCard, value) {
 }
 
 function updateSummary() {
-  const allInputs = document.querySelectorAll('input[type="radio"]');
+  const allInputs = rfList.querySelectorAll('input[type="radio"]');
   let countConforme = 0;
   let countNaoConforme = 0;
+  let countRessalvas = 0;
+  const naoAptos = [];
+  const atencao = [];
 
   allInputs.forEach(input => {
     if (input.checked) {
       if (input.value === 'conforme') countConforme += 1;
-      if (input.value === 'nao-conforme') countNaoConforme += 1;
+      if (input.value === 'nao-conforme') {
+        countNaoConforme += 1;
+        naoAptos.push(input.closest('.item-card'));
+      }
+      if (input.value === 'apto-ressalvas') {
+        countRessalvas += 1;
+        atencao.push(input.closest('.item-card'));
+      }
     }
   });
 
-  totalItens.textContent = allInputs.length / 3;
+  totalItens.textContent = rfList.querySelectorAll('.item-card').length;
   itensConformes.textContent = countConforme;
   itensNaoConformes.textContent = countNaoConforme;
 
-  const apto = countNaoConforme === 0 ? 'Apto' : 'Não apto';
+  const apto = countNaoConforme > 0 ? 'Não apto' : countRessalvas > 0 ? 'Apto com ressalvas' : 'Apto';
   statusRodar.textContent = apto;
   aptidaoSistema.textContent = apto;
 
-  const badgeClass = countNaoConforme === 0 ? 'status-apto' : 'status-nao-apto';
-  resultBadge.classList.remove('status-apto', 'status-nao-apto');
+  const badgeClass = countNaoConforme > 0 ? 'status-nao-apto' : countRessalvas > 0 ? 'status-apto-ressalvas' : 'status-apto';
+  resultBadge.classList.remove('status-apto', 'status-nao-apto', 'status-apto-ressalvas');
   resultBadge.classList.add(badgeClass);
-  resultBadge.textContent = countNaoConforme === 0 ? 'Apto para rodar' : 'Não apto para rodar';
+  resultBadge.textContent = countNaoConforme > 0 ? 'Não apto para rodar' : countRessalvas > 0 ? 'Apto com ressalvas' : 'Apto para rodar';
 
-  observacoesSistema.textContent = countNaoConforme === 0 ? 'Sem pendências' : 'Há itens fora do padrão';
+  observacoesSistema.textContent = countNaoConforme > 0 ? 'Há itens fora do padrão' : countRessalvas > 0 ? 'Há itens com ressalvas' : 'Sem pendências';
+
+  const renderResultItems = (list, cards, emptyMessage, statusText) => {
+    list.innerHTML = cards.length
+      ? cards.map(card => `<li><strong>${escapeHtml(card.querySelector('h3').textContent.replace(/^\d+\.\s*/, ''))}</strong> — ${statusText}</li>`).join('')
+      : `<li>${emptyMessage}</li>`;
+  };
+  renderResultItems(itensNaoAptos, naoAptos, 'Nenhum item não conforme', 'marcado como não conforme');
+  renderResultItems(itensAtencao, atencao, 'Nenhum item com ressalvas', 'marcado como apto com ressalvas');
 }
 
 function attachFileInput(triggerElement) {
@@ -329,6 +362,22 @@ function bindRadioEvents() {
   });
 }
 
+function bindChecklistTabs() {
+  const tabs = [
+    { button: document.getElementById('feedbackTab'), panel: document.getElementById('feedbackPanel') },
+    { button: document.getElementById('rnfTab'), panel: document.getElementById('rnfPanel') }
+  ];
+
+  tabs.forEach(({ button }) => button.addEventListener('click', () => {
+    tabs.forEach(({ button: tabButton, panel }) => {
+      const active = tabButton === button;
+      tabButton.classList.toggle('active', active);
+      tabButton.setAttribute('aria-selected', String(active));
+      panel.classList.toggle('hidden', !active);
+    });
+  }));
+}
+
 function addCustomItem() {
   const name = document.getElementById('customItemName').value.trim();
   const category = document.getElementById('customItemCategory').value;
@@ -383,7 +432,7 @@ function renderUserList() {
   const users = getUsers();
   userList.innerHTML = users.map(user => `
     <div class="record-row">
-      <span>${escapeHtml(user.username)} <small>${user.perfil === 'admin' ? 'Administrador' : 'Operador'}</small></span>
+      <span>${escapeHtml(user.username)} <small>${user.perfil === 'admin' ? 'Administrador' : 'Operador'}</small>${user.perfil === 'admin' && (user.email || user.phone) ? `<small>${escapeHtml(user.email || 'Sem e-mail')} · ${escapeHtml(user.phone || 'Sem telefone')}</small>` : ''}</span>
       <div class="record-actions">
         <button type="button" class="small-btn" data-action="edit-user" data-username="${encodeURIComponent(user.username)}">Editar</button>
         <button type="button" class="small-btn danger-btn" data-action="delete-user" data-username="${encodeURIComponent(user.username)}">Apagar</button>
@@ -400,6 +449,9 @@ function startUserEdit(username) {
   document.getElementById('editUsername').value = user.username;
   document.getElementById('editUserPassword').value = '';
   document.getElementById('editUserRole').value = user.perfil;
+  document.getElementById('editAdminEmail').value = user.email || '';
+  document.getElementById('editAdminPhone').value = user.phone || '';
+  updateAdminContactFields('editUserRole', 'editAdminEmailField', 'editAdminPhoneField', 'editAdminEmail', 'editAdminPhone', true);
   document.getElementById('userEditForm').classList.remove('hidden');
   document.getElementById('editUsername').focus();
 }
@@ -417,6 +469,8 @@ function saveUserChanges(event) {
   const username = document.getElementById('editUsername').value.trim();
   const password = document.getElementById('editUserPassword').value;
   const perfil = document.getElementById('editUserRole').value;
+  const email = document.getElementById('editAdminEmail').value.trim();
+  const phone = document.getElementById('editAdminPhone').value.trim();
   const userIndex = users.findIndex(user => user.username === originalUsername);
 
   if (userIndex < 0 || !username) return;
@@ -425,7 +479,7 @@ function saveUserChanges(event) {
     return;
   }
 
-  users[userIndex] = { ...users[userIndex], username, perfil };
+  users[userIndex] = { ...users[userIndex], username, perfil, email, phone };
   if (password) users[userIndex].password = password;
   localStorage.setItem(STORAGE_KEYS.users, JSON.stringify(users));
 
@@ -646,7 +700,7 @@ function exportCsv() {
   URL.revokeObjectURL(url);
 }
 
-function saveInspection() {
+async function saveInspection() {
   const currentUser = getCurrentUser();
   const now = new Date().toISOString();
   const existing = JSON.parse(localStorage.getItem('checklist-inspecao-v2') || 'null');
@@ -669,13 +723,18 @@ function saveInspection() {
     logoutAt: currentUser ? currentUser.logoutAt || null : null
   };
 
-  document.querySelectorAll('input[type="radio"]').forEach(radio => {
-    if (!payload.respostas[radio.name]) {
-      payload.respostas[radio.name] = radio.checked ? radio.value : 'conforme';
-    }
+  document.querySelectorAll('input[type="radio"]:checked').forEach(radio => {
+    payload.respostas[radio.name] = radio.value;
   });
 
   payload.fotos = appState.photos;
+  payload.itens = [...document.querySelectorAll('#rfList .item-card, #rnfList .item-card')].map(card => ({
+    id: card.dataset.id,
+    name: card.querySelector('h3')?.textContent.replace(/^\d+\.\s*/, '') || card.dataset.id
+  }));
+  payload.admins = getUsers().filter(user => user.perfil === 'admin').map(({ username, perfil, email, phone }) => ({
+    username, perfil, email, phone
+  }));
   saveHistory(payload);
   localStorage.setItem('checklist-inspecao-v2', JSON.stringify(payload));
   saveAuditEntry('relatorio_salvo', {
@@ -684,7 +743,33 @@ function saveInspection() {
     isNew: !existing
   });
   renderHistory();
-  alert('Inspeção salva com sucesso!');
+
+  try {
+    const response = await fetch('/api/inspections', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({}));
+      throw new Error(result.error || 'Não foi possível gerar o PDF no servidor.');
+    }
+
+    const pdf = await response.blob();
+    if (reportPdfObjectUrl) URL.revokeObjectURL(reportPdfObjectUrl);
+    reportPdfObjectUrl = URL.createObjectURL(pdf);
+    const pdfLink = document.getElementById('pdfDownloadFallback');
+    pdfLink.href = reportPdfObjectUrl;
+    pdfLink.download = `relatorio-${String(payload.placa || payload.veiculo || 'inspecao').replace(/[^a-z0-9_-]/gi, '-')}.pdf`;
+    pdfLink.classList.remove('hidden');
+    pdfLink.click();
+
+    const emailResult = response.headers.get('X-Email-Result') || 'sem confirmação';
+    const whatsappResult = response.headers.get('X-WhatsApp-Result') || 'sem confirmação';
+    alert(`Inspeção salva e PDF gerado.\nE-mail: ${emailResult}\nWhatsApp: ${whatsappResult}`);
+  } catch (error) {
+    alert(`Inspeção salva no navegador, mas não foi possível gerar/enviar o PDF pelo servidor.\n${error.message}`);
+  }
 }
 
 function loadSavedInspection() {
@@ -735,11 +820,20 @@ function loadSavedInspection() {
 function setAuthMode(mode) {
   const isRegister = mode === 'register';
   document.getElementById('roleField').classList.toggle('hidden', !isRegister);
+  updateAdminContactFields('authPerfil', 'authAdminEmailField', 'authAdminPhoneField', 'authAdminEmail', 'authAdminPhone', isRegister);
   const submitBtn = document.querySelector('.auth-submit');
   submitBtn.textContent = isRegister ? 'Cadastrar' : 'Entrar';
   document.querySelectorAll('.auth-tab').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.mode === mode);
   });
+}
+
+function updateAdminContactFields(roleSelectId, emailFieldId, phoneFieldId, emailInputId, phoneInputId, enabled) {
+  const isAdmin = enabled && document.getElementById(roleSelectId).value === 'admin';
+  document.getElementById(emailFieldId).classList.toggle('hidden', !isAdmin);
+  document.getElementById(phoneFieldId).classList.toggle('hidden', !isAdmin);
+  document.getElementById(emailInputId).required = isAdmin;
+  document.getElementById(phoneInputId).required = isAdmin;
 }
 
 function authMessage(text, isError = false) {
@@ -771,13 +865,13 @@ function loginUser(username, password) {
   return userSession;
 }
 
-function registerUser(username, password, perfil) {
+function registerUser(username, password, perfil, email = '', phone = '') {
   const users = getUsers();
   const existing = users.find(item => item.username.toLowerCase() === username.toLowerCase());
   if (existing) {
     return false;
   }
-  users.push({ username, password, perfil });
+  users.push({ username, password, perfil, email, phone });
   localStorage.setItem(STORAGE_KEYS.users, JSON.stringify(users));
   return true;
 }
@@ -842,7 +936,9 @@ function bindAuthEvents() {
 
     if (mode === 'register') {
       const perfil = document.getElementById('authPerfil').value;
-      if (registerUser(username, password, perfil)) {
+      const email = document.getElementById('authAdminEmail').value.trim();
+      const phone = document.getElementById('authAdminPhone').value.trim();
+      if (registerUser(username, password, perfil, email, phone)) {
         authMessage('Usuário cadastrado com sucesso. Faça login.');
         setAuthMode('login');
         document.getElementById('authForm').reset();
@@ -863,6 +959,12 @@ function bindAuthEvents() {
   });
 
   document.getElementById('logoutBtn').addEventListener('click', logoutUser);
+  document.getElementById('authPerfil').addEventListener('change', () => {
+    updateAdminContactFields('authPerfil', 'authAdminEmailField', 'authAdminPhoneField', 'authAdminEmail', 'authAdminPhone', true);
+  });
+  document.getElementById('editUserRole').addEventListener('change', () => {
+    updateAdminContactFields('editUserRole', 'editAdminEmailField', 'editAdminPhoneField', 'editAdminEmail', 'editAdminPhone', true);
+  });
 }
 
 adicionarVeiculoBtn.addEventListener('click', addVehicle);
@@ -908,6 +1010,7 @@ renderRnfChecklist();
 renderHistory();
 renderAuditLog();
 bindRadioEvents();
+bindChecklistTabs();
 updateSummary();
 loadSavedInspection();
 updateSummary();

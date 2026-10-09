@@ -33,6 +33,14 @@
               <option value="admin">Administrador</option>
             </select>
           </label>
+          <label id="authAdminEmailField" class="hidden">
+            <span>E-mail do administrador</span>
+            <input type="email" id="authAdminEmail" placeholder="admin@empresa.com" autocomplete="email" />
+          </label>
+          <label id="authAdminPhoneField" class="hidden">
+            <span>WhatsApp do administrador</span>
+            <input type="tel" id="authAdminPhone" placeholder="+55 11 99999-9999" autocomplete="tel" />
+          </label>
           <button type="submit" class="primary-btn auth-submit">Entrar</button>
         </form>
         <p id="authMessage" class="auth-message"></p>
@@ -132,6 +140,14 @@
                   <option value="admin">Administrador</option>
                 </select>
               </label>
+              <label id="editAdminEmailField" class="hidden">
+                <span>E-mail do administrador</span>
+                <input type="email" id="editAdminEmail" placeholder="admin@empresa.com" autocomplete="email" />
+              </label>
+              <label id="editAdminPhoneField" class="hidden">
+                <span>WhatsApp do administrador</span>
+                <input type="tel" id="editAdminPhone" placeholder="+55 11 99999-9999" autocomplete="tel" />
+              </label>
               <div class="management-actions">
                 <button type="submit" class="primary-btn">Salvar alterações</button>
                 <button type="button" id="cancelarEdicaoUsuario" class="secondary-btn">Cancelar</button>
@@ -146,8 +162,13 @@
         </div>
       </section>
 
+      <div class="checklist-tabs" role="tablist" aria-label="Seções de requisitos">
+        <button type="button" class="checklist-tab active" id="feedbackTab" role="tab" aria-selected="true" aria-controls="feedbackPanel">Requisitos Funcionais</button>
+        <button type="button" class="checklist-tab" id="rnfTab" role="tab" aria-selected="false" aria-controls="rnfPanel">Requisitos Não Funcionais</button>
+      </div>
+
       <main class="content-grid">
-        <section class="panel checklist-panel">
+        <section id="feedbackPanel" class="panel checklist-panel" role="tabpanel" aria-labelledby="feedbackTab">
           <div class="section-header">
             <div>
               <h2>Requisitos Funcionais</h2>
@@ -166,7 +187,7 @@
           <div id="rfList" class="checklist"></div>
         </section>
 
-        <aside class="panel checklist-panel">
+        <aside id="rnfPanel" class="panel checklist-panel hidden" role="tabpanel" aria-labelledby="rnfTab">
           <div class="section-header">
             <h2>Requisitos Não Funcionais</h2>
             <span class="badge badge-purple">RNF</span>
@@ -207,10 +228,22 @@
             <strong id="observacoesSistema">Sem pendências</strong>
           </div>
         </div>
+
+        <div class="result-grid single-line result-details-grid">
+          <div class="read-only-box">
+            <span>Itens que justificam “Não apto”</span>
+            <ul id="itensNaoAptos" class="result-item-list"><li>Nenhum item não conforme</li></ul>
+          </div>
+          <div class="read-only-box">
+            <span>Itens de atenção</span>
+            <ul id="itensAtencao" class="result-item-list"><li>Nenhum item com ressalvas</li></ul>
+          </div>
+        </div>
       </section>
 
       <div class="inspection-actions">
         <button id="salvarChecklist" class="primary-btn">Salvar alterações</button>
+        <a id="pdfDownloadFallback" class="secondary-btn pdf-download-fallback hidden" href="#" download>Baixar relatório PDF</a>
       </div>
 
       <section class="panel custom-item-panel">

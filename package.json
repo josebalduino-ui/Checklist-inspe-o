@@ -1,0 +1,17 @@
+{
+  "name": "checklist-inspecao",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Sistema de checklist de inspeção com geração e envio de relatórios PDF",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "nodemailer": "^10.0.16",
+    "pdfkit": "^0.17.1"
+  }
+}

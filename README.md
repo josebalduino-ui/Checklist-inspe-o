@@ -42,3 +42,24 @@
 | Operação offline | RNF | O sistema deve permitir inspeções sem conexão e sincronizar posteriormente |
 | Integridade | RNF | O sistema deve impedir alterações não rastreadas em inspeções encerradas |
 | Compatibilidade | RNF | O sistema deve funcionar nos dispositivos definidos para a operação |
+
+## Executar a aplicação com o backend
+
+O servidor Node hospeda a interface, gera o PDF ao salvar a inspeção e tenta enviá-lo aos e-mails e números de WhatsApp dos administradores cadastrados.
+
+1. Instale Node.js 22 ou superior.
+2. Execute `npm install`.
+3. Copie `.env.example` para `.env` e preencha as configurações disponíveis.
+4. Execute `npm start` e abra `http://localhost:8000`.
+
+### Configurar e-mail
+
+Preencha `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD` e `MAIL_FROM` com os dados SMTP do provedor de e-mail. O relatório é enviado como anexo PDF.
+
+### Configurar WhatsApp
+
+Preencha `WHATSAPP_API_VERSION`, `WHATSAPP_PHONE_NUMBER_ID` e `WHATSAPP_ACCESS_TOKEN` com os dados da WhatsApp Business Cloud API. O backend carrega o PDF para a API e envia o documento a cada administrador com telefone cadastrado.
+
+O cadastro no app deve incluir o telefone com código do país e DDD, por exemplo `+55 11 99999-9999`. Sem as configurações de um canal, o relatório ainda é gerado e baixado e o app informa que o canal está sem configuração.
+
+As credenciais devem ficar somente no `.env` local ou no gerenciador de segredos do servidor de produção; não as publique no repositório.
