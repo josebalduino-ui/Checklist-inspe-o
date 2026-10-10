@@ -77,6 +77,7 @@ create table if not exists public.equipamentos (
   nome text not null unique,
   descricao text not null default '',
   placa text,
+  data_entrada_empresa date,
   ativo boolean not null default true,
   criado_por uuid references public.perfis (id) on delete set null,
   criado_em timestamptz not null default now(),
@@ -85,6 +86,8 @@ create table if not exists public.equipamentos (
 
 alter table public.equipamentos
   add column if not exists descricao text not null default '';
+alter table public.equipamentos
+  add column if not exists data_entrada_empresa date;
 
 drop trigger if exists equipamentos_definir_atualizado_em on public.equipamentos;
 create trigger equipamentos_definir_atualizado_em
@@ -151,6 +154,7 @@ create table if not exists public.inspecoes (
   nome_veiculo_snapshot text not null default '',
   nome_equipamento text not null default '',
   placa text not null default '',
+  data_entrada_empresa_snapshot date,
   data_inspecao date,
   responsavel text not null default '',
   horimetro numeric(14, 1),
@@ -170,6 +174,9 @@ create table if not exists public.inspecoes (
   check (not horimetro_desabilitado or horimetro is null),
   check (not quilometragem_desabilitada or quilometragem_km is null)
 );
+
+alter table public.inspecoes
+  add column if not exists data_entrada_empresa_snapshot date;
 
 create index if not exists inspecoes_data_idx on public.inspecoes (data_inspecao desc);
 create index if not exists inspecoes_criado_por_idx on public.inspecoes (criado_por);

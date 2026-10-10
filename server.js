@@ -90,6 +90,7 @@ function createInspectionPdf(inspection) {
     line('Veículo', inspection.veiculo);
     line('Equipamento', inspection.equipamento);
     line('Placa', inspection.placa);
+    line('Entrada na empresa', inspection.dataEntradaEmpresa);
     line('Data da inspeção', inspection.dataInspecao);
     line('Responsável', inspection.responsavel);
 

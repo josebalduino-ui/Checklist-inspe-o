@@ -55,7 +55,7 @@ let supabaseClient = null;
 let vehicleRecords = [];
 let checklistRecords = [];
 let supabaseReady = false;
-let vehicleDescriptionColumnAvailable = true;
+let vehicleDetailsColumnsAvailable = true;
 
 function logSupabaseError(stage, error) {
   const summary = `[Supabase][${stage}] ${error?.message || String(error)}${error?.code ? ` (código ${error.code})` : ''}${error?.status ? ` (HTTP ${error.status})` : ''}`;
@@ -112,14 +112,14 @@ async function loadSupabaseData() {
   const savedInspection = JSON.parse(localStorage.getItem('checklist-inspecao-v2') || 'null');
   const preferredVehicle = veiculoSelect.value || savedInspection?.veiculo || '';
   let [vehiclesResult, itemsResult, inspectionsResult, auditResult] = await Promise.all([
-    supabaseClient.from('equipamentos').select('id,nome,descricao,placa,ativo').eq('ativo', true).order('nome'),
+    supabaseClient.from('equipamentos').select('id,nome,descricao,placa,data_entrada_empresa,ativo').eq('ativo', true).order('nome'),
     supabaseClient.from('itens_checklist').select('id,codigo,nome,descricao,categoria,personalizado').eq('ativo', true).order('nome'),
     supabaseClient.from('inspecoes').select('*,respostas_inspecao(*),fotos_inspecao(*)').order('criado_em', { ascending: false }),
     supabaseClient.from('registros_auditoria').select('*').order('criado_em', { ascending: false }).limit(50)
   ]);
   if (vehiclesResult.error && ['42703', 'PGRST204'].includes(vehiclesResult.error.code)) {
-    vehicleDescriptionColumnAvailable = false;
-    console.warn('[Supabase][equipamentos] a coluna descricao ainda não existe; carregando veículos sem descrição. Execute supabase/schema.sql para habilitar o cadastro completo.');
+    vehicleDetailsColumnsAvailable = false;
+    console.warn('[Supabase][equipamentos] as colunas de cadastro completo ainda não existem; carregando veículos sem os novos dados. Execute supabase/schema.sql para habilitar o cadastro completo.');
     vehiclesResult = await supabaseClient.from('equipamentos')
       .select('id,nome,placa,ativo').eq('ativo', true).order('nome');
   }
@@ -138,7 +138,7 @@ async function loadSupabaseData() {
       throw result.error;
     }
   }
-  vehicleRecords = (vehiclesResult.data || []).map(item => ({ descricao: '', ...item }));
+  vehicleRecords = (vehiclesResult.data || []).map(item => ({ descricao: '', data_entrada_empresa: '', ...item }));
   appState.vehicles = vehicleRecords.map(item => item.nome);
   checklistRecords = itemsResult.data || [];
   const customItems = checklistRecords.filter(item => item.personalizado).map(item => ({
@@ -148,6 +148,7 @@ async function loadSupabaseData() {
   const history = (inspectionsResult.data || []).map(row => ({
     id: row.id, veiculo: row.nome_veiculo_snapshot, equipamento: row.nome_equipamento,
     placa: row.placa, dataInspecao: row.data_inspecao, responsavel: row.responsavel,
+    dataEntradaEmpresa: row.data_entrada_empresa_snapshot,
     horimetro: row.horimetro, horimetroDesabilitado: row.horimetro_desabilitado,
     quilometragem: row.quilometragem_km, quilometragemDesabilitada: row.quilometragem_desabilitada,
     naoConformidade: row.observacoes_nao_conformidade, ordemServico: row.ordem_servico_necessaria ? 'sim' : 'nao',
@@ -565,6 +566,7 @@ function updateSelectedVehicleDetails() {
   const vehicle = vehicleRecords.find(item => item.nome === veiculoSelect.value);
   document.getElementById('equipamento').value = vehicle?.descricao || '';
   document.getElementById('placa').value = vehicle?.placa || '';
+  document.getElementById('dataEntradaEmpresa').value = vehicle?.data_entrada_empresa || '';
 }
 
 function renderVehicleList() {
@@ -575,9 +577,9 @@ function renderVehicleList() {
 
   vehicleList.innerHTML = appState.vehicles.map((vehicle, index) => `
     <div class="record-row">
-      <span>${escapeHtml(vehicle)}<small>${escapeHtml(vehicleRecords.find(item => item.nome === vehicle)?.descricao || 'Sem descrição')} · ${escapeHtml(vehicleRecords.find(item => item.nome === vehicle)?.placa || 'Sem placa')}</small></span>
+      <span>${escapeHtml(vehicle)}<small>${escapeHtml(vehicleRecords.find(item => item.nome === vehicle)?.descricao || 'Sem descrição')} · ${escapeHtml(vehicleRecords.find(item => item.nome === vehicle)?.placa || 'Sem placa')} · Entrada: ${escapeHtml(vehicleRecords.find(item => item.nome === vehicle)?.data_entrada_empresa || 'Sem data')}</small></span>
       <div class="record-actions">
-        <button type="button" class="small-btn" data-action="edit-vehicle" data-index="${index}">Editar</button>
+        <button type="button" class="small-btn" data-action="edit-vehicle" data-index="${index}">Editar dados</button>
         <button type="button" class="small-btn danger-btn" data-action="delete-vehicle" data-index="${index}">Apagar</button>
       </div>
     </div>
@@ -678,7 +680,7 @@ function deleteUser(username) {
   if (appState.editingUsername === username) resetUserEdit();
 }
 
-async function updateVehicle(value, descricao, placa) {
+async function updateVehicle(value, descricao, placa, dataEntradaEmpresa) {
   const editingVehicle = appState.editingVehicle;
   if (editingVehicle !== null) {
     const duplicate = appState.vehicles.some((vehicle, index) => index !== editingVehicle && vehicle.toLowerCase() === value.toLowerCase());
@@ -692,11 +694,11 @@ async function updateVehicle(value, descricao, placa) {
     if (supabaseReady) {
       const record = vehicleRecords.find(item => item.nome === oldName);
       const { data, error } = await supabaseClient.from('equipamentos')
-        .update({ nome: value, descricao, placa: placa || null })
-        .eq('id', record.id).select('id,nome,descricao,placa,ativo').single();
-      if (error) return alert(vehicleDescriptionColumnAvailable
+        .update({ nome: value, descricao, placa, data_entrada_empresa: dataEntradaEmpresa })
+        .eq('id', record.id).select('id,nome,descricao,placa,data_entrada_empresa,ativo').single();
+      if (error) return alert(vehicleDetailsColumnsAvailable
         ? `Não foi possível atualizar o equipamento: ${error.message}`
-        : 'Execute supabase/schema.sql no SQL Editor do Supabase para habilitar o campo de descrição do equipamento.');
+        : 'Execute supabase/schema.sql no SQL Editor do Supabase para habilitar os campos completos do veículo.');
       vehicleRecords = vehicleRecords.map(item => item.id === data.id ? data : item);
       appState.vehicles[editingVehicle] = value;
       await loadSupabaseData();
@@ -712,11 +714,12 @@ async function updateVehicle(value, descricao, placa) {
   } else {
     if (supabaseReady) {
       const { data, error } = await supabaseClient.from('equipamentos').insert({
-        nome: value, descricao, placa: placa || null, criado_por: getCurrentUser().id
-      }).select('id,nome,descricao,placa,ativo').single();
-      if (error) return alert(vehicleDescriptionColumnAvailable
+        nome: value, descricao, placa, data_entrada_empresa: dataEntradaEmpresa,
+        criado_por: getCurrentUser().id
+      }).select('id,nome,descricao,placa,data_entrada_empresa,ativo').single();
+      if (error) return alert(vehicleDetailsColumnsAvailable
         ? `Não foi possível cadastrar o equipamento: ${error.message}`
-        : 'Execute supabase/schema.sql no SQL Editor do Supabase para habilitar o campo de descrição do equipamento.');
+        : 'Execute supabase/schema.sql no SQL Editor do Supabase para habilitar os campos completos do veículo.');
       vehicleRecords.push(data);
     }
     appState.vehicles.push(value);
@@ -734,6 +737,7 @@ function finishVehicleEdit() {
   novoVeiculoInput.value = '';
   document.getElementById('novoEquipamentoDescricao').value = '';
   document.getElementById('novaPlaca').value = '';
+  document.getElementById('novaDataEntradaEmpresa').value = '';
   adicionarVeiculoBtn.textContent = 'Cadastrar veículo';
   document.getElementById('cancelarEdicaoVeiculo').classList.add('hidden');
 }
@@ -761,13 +765,14 @@ async function addVehicle() {
   const value = novoVeiculoInput.value.trim();
   const descricao = document.getElementById('novoEquipamentoDescricao').value.trim();
   const placa = document.getElementById('novaPlaca').value.trim();
-  if (!value || !descricao || !placa) {
-    alert('Preencha o nome do veículo, a descrição do equipamento e a placa.');
+  const dataEntradaEmpresa = document.getElementById('novaDataEntradaEmpresa').value;
+  if (!value || !descricao || !placa || !dataEntradaEmpresa) {
+    alert('Preencha o nome do veículo, a descrição do equipamento, a placa e a data de entrada na empresa.');
     return;
   }
 
   const wasEditing = appState.editingVehicle !== null;
-  await updateVehicle(value, descricao, placa);
+  await updateVehicle(value, descricao, placa, dataEntradaEmpresa);
   if (appState.editingVehicle === null && (wasEditing || appState.vehicles.includes(value))) finishVehicleEdit();
 }
 
@@ -879,11 +884,12 @@ function exportCsv() {
   }
 
   const rows = [
-    ['Veículo', 'Equipamento', 'Placa', 'Data', 'Responsável', 'Resultado', 'Não conformidade'],
+    ['Veículo', 'Equipamento', 'Placa', 'Entrada na empresa', 'Data da inspeção', 'Responsável', 'Resultado', 'Não conformidade'],
     ...history.map(item => [
       item.veiculo || '',
       item.equipamento || '',
       item.placa || '',
+      item.dataEntradaEmpresa || '',
       item.dataInspecao || '',
       item.responsavel || '',
       item.aptidaoSistema || '',
@@ -911,6 +917,7 @@ async function saveInspection() {
     equipamento: document.getElementById('equipamento').value,
     placa: document.getElementById('placa').value,
     dataInspecao: document.getElementById('dataInspecao').value,
+    dataEntradaEmpresa: document.getElementById('dataEntradaEmpresa').value,
     responsavel: document.getElementById('responsavel').value,
     horimetro: document.getElementById('horimetro').value,
     horimetroDesabilitado: document.getElementById('horimetroDesabilitado').checked,
@@ -937,6 +944,7 @@ async function saveInspection() {
       equipamento_id: selectedVehicle?.id || null,
       nome_veiculo_snapshot: payload.veiculo || '',
       nome_equipamento: payload.equipamento || '', placa: payload.placa || '',
+      data_entrada_empresa_snapshot: payload.dataEntradaEmpresa || null,
       data_inspecao: payload.dataInspecao || null, responsavel: payload.responsavel || '',
       horimetro: payload.horimetroDesabilitado || payload.horimetro === '' ? null : Number(payload.horimetro),
       horimetro_desabilitado: payload.horimetroDesabilitado,
@@ -1038,8 +1046,6 @@ function loadSavedInspection() {
       veiculoSelect.value = data.veiculo;
       updateSelectedVehicleDetails();
     }
-    document.getElementById('equipamento').value = data.equipamento || '';
-    document.getElementById('placa').value = data.placa || '';
     document.getElementById('dataInspecao').value = data.dataInspecao || '';
     document.getElementById('responsavel').value = data.responsavel || '';
     document.getElementById('horimetro').value = data.horimetro || '';
@@ -1087,6 +1093,7 @@ async function openInspectionPdf() {
     equipamento: document.getElementById('equipamento').value,
     placa: document.getElementById('placa').value,
     dataInspecao: document.getElementById('dataInspecao').value,
+    dataEntradaEmpresa: document.getElementById('dataEntradaEmpresa').value,
     responsavel: document.getElementById('responsavel').value,
     horimetro: document.getElementById('horimetro').value,
     horimetroDesabilitado: document.getElementById('horimetroDesabilitado').checked,
@@ -1269,7 +1276,8 @@ vehicleList.addEventListener('click', event => {
     novoVeiculoInput.value = vehicleName;
     document.getElementById('novoEquipamentoDescricao').value = vehicle?.descricao || '';
     document.getElementById('novaPlaca').value = vehicle?.placa || '';
-    adicionarVeiculoBtn.textContent = 'Salvar veículo';
+    document.getElementById('novaDataEntradaEmpresa').value = vehicle?.data_entrada_empresa || '';
+    adicionarVeiculoBtn.textContent = 'Salvar dados do veículo';
     document.getElementById('cancelarEdicaoVeiculo').classList.remove('hidden');
     novoVeiculoInput.focus();
   } else if (button.dataset.action === 'delete-vehicle') {
