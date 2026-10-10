@@ -49,8 +49,8 @@ O servidor Node hospeda a interface e gera o PDF para download ao salvar ou expo
 
 1. Instale Node.js 22 ou superior.
 2. Execute `npm install`.
-3. Execute `supabase/schema.sql` no SQL Editor do projeto Supabase.
-4. Copie `.env.example` para `.env` e preencha `SUPABASE_URL` e `SUPABASE_ANON_KEY` com os dados do projeto. A chave `service_role` não deve ser usada no navegador nem neste arquivo.
+3. Execute `supabase/schema.sql` no SQL Editor do projeto Supabase. Se o schema já estava instalado, execute o arquivo novamente para adicionar a coluna de descrição do equipamento.
+4. A URL do projeto e a chave pública ficam em `config.js`. A chave `service_role` nunca deve ser colocada nesse arquivo.
 5. Ative confirmação por e-mail no Supabase Auth (ou desative-a durante o desenvolvimento) e configure a URL de redirecionamento do site.
 6. Execute `npm start` e abra `http://localhost:8000`.
 

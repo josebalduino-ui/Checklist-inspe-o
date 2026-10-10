@@ -75,12 +75,16 @@ $$;
 create table if not exists public.equipamentos (
   id uuid primary key default gen_random_uuid(),
   nome text not null unique,
+  descricao text not null default '',
   placa text,
   ativo boolean not null default true,
   criado_por uuid references public.perfis (id) on delete set null,
   criado_em timestamptz not null default now(),
   atualizado_em timestamptz not null default now()
 );
+
+alter table public.equipamentos
+  add column if not exists descricao text not null default '';
 
 drop trigger if exists equipamentos_definir_atualizado_em on public.equipamentos;
 create trigger equipamentos_definir_atualizado_em

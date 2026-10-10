@@ -97,11 +97,11 @@
           </label>
           <label>
             <span>Equipamento</span>
-            <input type="text" id="equipamento" placeholder="Ex.: Caminhão 01" />
+            <input type="text" id="equipamento" placeholder="Descrição preenchida pelo veículo" readonly />
           </label>
           <label>
             <span>Placa</span>
-            <input type="text" id="placa" placeholder="Ex.: ABC-1234" />
+            <input type="text" id="placa" placeholder="Preenchida pelo veículo" readonly />
           </label>
           <label>
             <span>Data</span>
@@ -111,12 +111,25 @@
             <span>Responsável</span>
             <input type="text" id="responsavel" placeholder="Nome do operador" />
           </label>
-          <div class="inline-actions vehicle-box">
-            <div class="vehicle-input-wrap">
-              <input type="text" id="novoVeiculo" placeholder="Adicionar novo veículo" />
+          <div class="vehicle-box">
+            <div class="vehicle-registration-grid">
+              <label>
+                <span>Nome do veículo</span>
+                <input type="text" id="novoVeiculo" placeholder="Ex.: Caminhão 01" />
+              </label>
+              <label>
+                <span>Descrição do equipamento</span>
+                <input type="text" id="novoEquipamentoDescricao" placeholder="Ex.: Caminhão basculante" />
+              </label>
+              <label>
+                <span>Placa</span>
+                <input type="text" id="novaPlaca" placeholder="Ex.: ABC-1234" />
+              </label>
             </div>
-            <button type="button" id="adicionarVeiculo" class="ghost-btn">Adicionar veículo</button>
-            <button type="button" id="cancelarEdicaoVeiculo" class="secondary-btn hidden">Cancelar</button>
+            <div class="inline-actions">
+              <button type="button" id="adicionarVeiculo" class="ghost-btn">Cadastrar veículo</button>
+              <button type="button" id="cancelarEdicaoVeiculo" class="secondary-btn hidden">Cancelar</button>
+            </div>
           </div>
         </div>
       </section>
@@ -220,15 +233,10 @@
           <span id="resultBadge" class="status-pill status-apto">Apto para rodar</span>
         </div>
 
-        <div class="result-grid">
+        <div class="result-grid single-line">
           <label>
-            <span>Não conformidade observada</span>
-            <textarea id="naoConformidade" rows="4" placeholder="Descreva o problema encontrado..."></textarea>
-          </label>
-
-          <label>
-            <span>Ordem de serviço</span>
-            <select id="ordemServico">
+            <span>Ordem de serviço (definida automaticamente)</span>
+            <select id="ordemServico" class="summary-generated" disabled>
               <option value="nao">Não necessária</option>
               <option value="sim">Necessária</option>
             </select>
@@ -237,8 +245,10 @@
 
         <div class="result-grid single-line">
           <div class="read-only-box">
-            <span>Aptidão para rodar</span>
+            <span>Aptidão para rodar (calculada automaticamente)</span>
             <strong id="aptidaoSistema">Apto</strong>
+            <span>Itens que tornam o equipamento não apto (<strong id="aptidaoItemCount">0</strong>)</span>
+            <ul id="aptidaoItens" class="result-item-list"><li>Nenhum item não conforme</li></ul>
           </div>
 
           <div class="read-only-box">
@@ -249,11 +259,7 @@
 
         <div class="result-grid single-line result-details-grid">
           <div class="read-only-box">
-            <span>Itens que justificam “Não apto”</span>
-            <ul id="itensNaoAptos" class="result-item-list"><li>Nenhum item não conforme</li></ul>
-          </div>
-          <div class="read-only-box">
-            <span>Itens de atenção</span>
+            <span>Itens de atenção (<strong id="countAtencao">0</strong>)</span>
             <ul id="itensAtencao" class="result-item-list"><li>Nenhum item com ressalvas</li></ul>
           </div>
         </div>
@@ -307,6 +313,7 @@
       </section>
     </div>
 
+    <script src="config.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="script.js"></script>
   </body>

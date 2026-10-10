@@ -44,6 +44,7 @@ const rnfItems = [
 
 const appState = {
   photos: {},
+  answers: {},
   currentFilter: 'todos',
   vehicles: getStoredVehicles(),
   editingVehicle: null,
@@ -54,17 +55,39 @@ let supabaseClient = null;
 let vehicleRecords = [];
 let checklistRecords = [];
 let supabaseReady = false;
+let vehicleDescriptionColumnAvailable = true;
+
+function logSupabaseError(stage, error) {
+  const summary = `[Supabase][${stage}] ${error?.message || String(error)}${error?.code ? ` (código ${error.code})` : ''}${error?.status ? ` (HTTP ${error.status})` : ''}`;
+  console.error(summary, {
+    name: error?.name,
+    code: error?.code,
+    status: error?.status,
+    details: error?.details,
+    hint: error?.hint
+  });
+}
 
 async function initializeSupabase() {
-  const configResponse = await fetch('/api/config');
-  const config = await configResponse.json();
-  if (!config.supabaseUrl || !config.supabaseAnonKey || !window.supabase?.createClient) {
-    throw new Error('Configure SUPABASE_URL e SUPABASE_ANON_KEY no arquivo .env e reinicie o servidor.');
+  const config = window.APP_CONFIG;
+  console.log('[Supabase][config] verificando configuração', {
+    configLoaded: Boolean(config),
+    urlLoaded: Boolean(config?.supabaseUrl),
+    publishableKeyLoaded: Boolean(config?.supabasePublishableKey),
+    libraryLoaded: Boolean(window.supabase?.createClient)
+  });
+  if (!config?.supabaseUrl || !config?.supabasePublishableKey || !window.supabase?.createClient) {
+    throw new Error('Não foi possível carregar config.js ou a biblioteca do Supabase.');
   }
-  supabaseClient = window.supabase.createClient(config.supabaseUrl, config.supabaseAnonKey);
+  supabaseClient = window.supabase.createClient(config.supabaseUrl, config.supabasePublishableKey);
   supabaseReady = true;
+  console.log('[Supabase][config] cliente inicializado');
   const { data: { session }, error } = await supabaseClient.auth.getSession();
-  if (error) throw error;
+  if (error) {
+    logSupabaseError('getSession', error);
+    throw error;
+  }
+  console.log('[Supabase][sessão] sessão encontrada:', Boolean(session));
   if (session) await applySession(session);
 }
 
@@ -72,7 +95,11 @@ async function applySession(session) {
   if (!session?.user) return;
   const { data: profile, error } = await supabaseClient.from('perfis')
     .select('id,nome_usuario,perfil,telefone').eq('id', session.user.id).single();
-  if (error) throw error;
+  if (error) {
+    logSupabaseError('perfil', error);
+    throw error;
+  }
+  console.log('[Supabase][perfil] carregado', { id: profile.id, perfil: profile.perfil });
   localStorage.setItem(STORAGE_KEYS.currentUser, JSON.stringify({
     id: profile.id, username: profile.nome_usuario, perfil: profile.perfil,
     email: session.user.email, phone: profile.telefone
@@ -82,16 +109,36 @@ async function applySession(session) {
 }
 
 async function loadSupabaseData() {
-  const [vehiclesResult, itemsResult, inspectionsResult, auditResult] = await Promise.all([
-    supabaseClient.from('equipamentos').select('id,nome,placa,ativo').eq('ativo', true).order('nome'),
+  const savedInspection = JSON.parse(localStorage.getItem('checklist-inspecao-v2') || 'null');
+  const preferredVehicle = veiculoSelect.value || savedInspection?.veiculo || '';
+  let [vehiclesResult, itemsResult, inspectionsResult, auditResult] = await Promise.all([
+    supabaseClient.from('equipamentos').select('id,nome,descricao,placa,ativo').eq('ativo', true).order('nome'),
     supabaseClient.from('itens_checklist').select('id,codigo,nome,descricao,categoria,personalizado').eq('ativo', true).order('nome'),
     supabaseClient.from('inspecoes').select('*,respostas_inspecao(*),fotos_inspecao(*)').order('criado_em', { ascending: false }),
     supabaseClient.from('registros_auditoria').select('*').order('criado_em', { ascending: false }).limit(50)
   ]);
-  for (const result of [vehiclesResult, itemsResult, inspectionsResult, auditResult]) {
-    if (result.error) throw result.error;
+  if (vehiclesResult.error && ['42703', 'PGRST204'].includes(vehiclesResult.error.code)) {
+    vehicleDescriptionColumnAvailable = false;
+    console.warn('[Supabase][equipamentos] a coluna descricao ainda não existe; carregando veículos sem descrição. Execute supabase/schema.sql para habilitar o cadastro completo.');
+    vehiclesResult = await supabaseClient.from('equipamentos')
+      .select('id,nome,placa,ativo').eq('ativo', true).order('nome');
   }
-  vehicleRecords = vehiclesResult.data || [];
+  for (const [resource, result] of [
+    ['equipamentos', vehiclesResult], ['itens_checklist', itemsResult],
+    ['inspecoes', inspectionsResult], ['registros_auditoria', auditResult]
+  ]) {
+    console.log(`[Supabase][tabela:${resource}] resposta`, {
+      ok: !result.error,
+      error: result.error?.message,
+      code: result.error?.code,
+      status: result.status
+    });
+    if (result.error) {
+      logSupabaseError(`tabela:${resource}`, result.error);
+      throw result.error;
+    }
+  }
+  vehicleRecords = (vehiclesResult.data || []).map(item => ({ descricao: '', ...item }));
   appState.vehicles = vehicleRecords.map(item => item.nome);
   checklistRecords = itemsResult.data || [];
   const customItems = checklistRecords.filter(item => item.personalizado).map(item => ({
@@ -118,6 +165,10 @@ async function loadSupabaseData() {
   renderChecklist(rfList, getAllRfItems(), 'RF');
   renderHistory();
   renderAuditLog();
+  if (preferredVehicle && appState.vehicles.includes(preferredVehicle)) {
+    veiculoSelect.value = preferredVehicle;
+    updateSelectedVehicleDetails();
+  }
 }
 
 function getStoredVehicles() {
@@ -172,7 +223,6 @@ const itensNaoConformes = document.getElementById('itensNaoConformes');
 const statusRodar = document.getElementById('statusRodar');
 const aptidaoSistema = document.getElementById('aptidaoSistema');
 const observacoesSistema = document.getElementById('observacoesSistema');
-const itensNaoAptos = document.getElementById('itensNaoAptos');
 const itensAtencao = document.getElementById('itensAtencao');
 const resultBadge = document.getElementById('resultBadge');
 const salvarChecklistBtn = document.getElementById('salvarChecklist');
@@ -236,7 +286,7 @@ function getVisibleRfItems() {
 function renderChecklist(listEl, items, type) {
   const visibleItems = getVisibleRfItems();
   listEl.innerHTML = visibleItems.map((item, index) => {
-    const defaultValue = 'conforme';
+    const defaultValue = appState.answers[item.id] || 'conforme';
 
     return `
       <div class="item-card ${getStatusClass(defaultValue)}" data-id="${item.id}">
@@ -249,20 +299,20 @@ function renderChecklist(listEl, items, type) {
         </div>
 
         <div class="status-group">
-          <label class="option conforme selected" data-status="conforme">
-            <input type="radio" name="${item.id}" value="conforme" checked />
+          <label class="option conforme ${defaultValue === 'conforme' ? 'selected' : ''}" data-status="conforme">
+            <input type="radio" name="${item.id}" value="conforme" ${defaultValue === 'conforme' ? 'checked' : ''} />
             Conforme
           </label>
-          <label class="option nao-conforme" data-status="nao-conforme">
-            <input type="radio" name="${item.id}" value="nao-conforme" />
+          <label class="option nao-conforme ${defaultValue === 'nao-conforme' ? 'selected' : ''}" data-status="nao-conforme">
+            <input type="radio" name="${item.id}" value="nao-conforme" ${defaultValue === 'nao-conforme' ? 'checked' : ''} />
             Não conforme
           </label>
-          <label class="option apto-ressalvas" data-status="apto-ressalvas">
-            <input type="radio" name="${item.id}" value="apto-ressalvas" />
+          <label class="option apto-ressalvas ${defaultValue === 'apto-ressalvas' ? 'selected' : ''}" data-status="apto-ressalvas">
+            <input type="radio" name="${item.id}" value="apto-ressalvas" ${defaultValue === 'apto-ressalvas' ? 'checked' : ''} />
             Apto com ressalvas
           </label>
-          <label class="option n-a" data-status="n-a">
-            <input type="radio" name="${item.id}" value="n-a" />
+          <label class="option n-a ${defaultValue === 'n-a' ? 'selected' : ''}" data-status="n-a">
+            <input type="radio" name="${item.id}" value="n-a" ${defaultValue === 'n-a' ? 'checked' : ''} />
             N/A
           </label>
         </div>
@@ -279,30 +329,31 @@ function renderChecklist(listEl, items, type) {
 
 function renderRnfChecklist() {
   rnfList.innerHTML = rnfItems.map((item, index) => {
+    const defaultValue = appState.answers[item.id] || 'conforme';
     return `
-      <div class="item-card conforme" data-id="${item.id}">
+      <div class="item-card ${getStatusClass(defaultValue)}" data-id="${item.id}">
         <div class="item-header">
           <div>
             <h3>${index + 1}. ${item.name}</h3>
             <p>${item.description}</p>
           </div>
-          <span class="status-badge status-conforme">Conforme</span>
+          <span class="status-badge status-${defaultValue === 'nao-conforme' ? 'nao-conforme' : defaultValue === 'apto-ressalvas' ? 'apto-ressalvas' : defaultValue === 'n-a' ? 'n-a' : 'conforme'}">${getStatusLabel(defaultValue)}</span>
         </div>
         <div class="status-group">
-          <label class="option conforme selected" data-status="conforme">
-            <input type="radio" name="${item.id}" value="conforme" checked />
+          <label class="option conforme ${defaultValue === 'conforme' ? 'selected' : ''}" data-status="conforme">
+            <input type="radio" name="${item.id}" value="conforme" ${defaultValue === 'conforme' ? 'checked' : ''} />
             Conforme
           </label>
-          <label class="option nao-conforme" data-status="nao-conforme">
-            <input type="radio" name="${item.id}" value="nao-conforme" />
+          <label class="option nao-conforme ${defaultValue === 'nao-conforme' ? 'selected' : ''}" data-status="nao-conforme">
+            <input type="radio" name="${item.id}" value="nao-conforme" ${defaultValue === 'nao-conforme' ? 'checked' : ''} />
             Não conforme
           </label>
-          <label class="option apto-ressalvas" data-status="apto-ressalvas">
-            <input type="radio" name="${item.id}" value="apto-ressalvas" />
+          <label class="option apto-ressalvas ${defaultValue === 'apto-ressalvas' ? 'selected' : ''}" data-status="apto-ressalvas">
+            <input type="radio" name="${item.id}" value="apto-ressalvas" ${defaultValue === 'apto-ressalvas' ? 'checked' : ''} />
             Apto com ressalvas
           </label>
-          <label class="option n-a" data-status="n-a">
-            <input type="radio" name="${item.id}" value="n-a" />
+          <label class="option n-a ${defaultValue === 'n-a' ? 'selected' : ''}" data-status="n-a">
+            <input type="radio" name="${item.id}" value="n-a" ${defaultValue === 'n-a' ? 'checked' : ''} />
             N/A
           </label>
         </div>
@@ -327,34 +378,24 @@ function updateItemVisual(itemCard, value) {
 }
 
 function updateSummary() {
-  const allInputs = rfList.querySelectorAll('input[type="radio"]');
-  let countConforme = 0;
-  let countNaoConforme = 0;
-  let countRessalvas = 0;
-  const naoAptos = [];
-  const atencao = [];
+  const items = getAllRfItems().map(item => ({
+    ...item,
+    situacao: appState.answers[item.id] || 'conforme'
+  }));
+  const countConforme = items.filter(item => item.situacao === 'conforme').length;
+  const naoAptos = items.filter(item => item.situacao === 'nao-conforme');
+  const atencao = items.filter(item => item.situacao === 'apto-ressalvas');
+  const countNaoConforme = naoAptos.length;
+  const countRessalvas = atencao.length;
 
-  allInputs.forEach(input => {
-    if (input.checked) {
-      if (input.value === 'conforme') countConforme += 1;
-      if (input.value === 'nao-conforme') {
-        countNaoConforme += 1;
-        naoAptos.push(input.closest('.item-card'));
-      }
-      if (input.value === 'apto-ressalvas') {
-        countRessalvas += 1;
-        atencao.push(input.closest('.item-card'));
-      }
-    }
-  });
-
-  totalItens.textContent = rfList.querySelectorAll('.item-card').length;
+  totalItens.textContent = items.length;
   itensConformes.textContent = countConforme;
   itensNaoConformes.textContent = countNaoConforme;
 
   const apto = countNaoConforme > 0 ? 'Não apto' : countRessalvas > 0 ? 'Apto com ressalvas' : 'Apto';
   statusRodar.textContent = apto;
   aptidaoSistema.textContent = apto;
+  document.getElementById('ordemServico').value = countNaoConforme > 0 ? 'sim' : 'nao';
 
   const badgeClass = countNaoConforme > 0 ? 'status-nao-apto' : countRessalvas > 0 ? 'status-apto-ressalvas' : 'status-apto';
   resultBadge.classList.remove('status-apto', 'status-nao-apto', 'status-apto-ressalvas');
@@ -365,11 +406,27 @@ function updateSummary() {
 
   const renderResultItems = (list, cards, emptyMessage, statusText) => {
     list.innerHTML = cards.length
-      ? cards.map(card => `<li><strong>${escapeHtml(card.querySelector('h3').textContent.replace(/^\d+\.\s*/, ''))}</strong> — ${statusText}</li>`).join('')
+      ? cards.map(item => `<li><strong>${escapeHtml(item.name)}</strong> — ${statusText}</li>`).join('')
       : `<li>${emptyMessage}</li>`;
   };
-  renderResultItems(itensNaoAptos, naoAptos, 'Nenhum item não conforme', 'marcado como não conforme');
+  renderResultItems(document.getElementById('aptidaoItens'), naoAptos, 'Nenhum item não conforme', 'marcado como não conforme');
   renderResultItems(itensAtencao, atencao, 'Nenhum item com ressalvas', 'marcado como apto com ressalvas');
+  document.getElementById('aptidaoItemCount').textContent = countNaoConforme;
+  document.getElementById('countAtencao').textContent = countRessalvas;
+}
+
+function getNonconformitySummary() {
+  const names = getAllRfItems()
+    .filter(item => appState.answers[item.id] === 'nao-conforme')
+    .map(item => item.name);
+  return names.length ? names.join('; ') : 'Nenhuma não conformidade identificada.';
+}
+
+function collectAnswers() {
+  return Object.fromEntries([...getAllRfItems(), ...rnfItems].map(item => {
+    const selected = document.querySelector(`input[name="${CSS.escape(item.id)}"]:checked`);
+    return [item.id, appState.answers[item.id] || selected?.value || 'conforme'];
+  }));
 }
 
 function attachFileInput(triggerElement) {
@@ -413,6 +470,7 @@ function bindRadioEvents() {
   document.querySelectorAll('input[type="radio"]').forEach(input => {
     input.addEventListener('change', event => {
       const itemCard = event.target.closest('.item-card');
+      appState.answers[event.target.name] = event.target.value;
       if (itemCard) {
         updateItemVisual(itemCard, event.target.value);
       }
@@ -500,6 +558,13 @@ function populateVehicleOptions() {
   veiculoSelect.innerHTML = '<option value="">Selecione um veículo</option>' +
     appState.vehicles.map(vehicle => `<option value="${escapeHtml(vehicle)}">${escapeHtml(vehicle)}</option>`).join('');
   renderVehicleList();
+  updateSelectedVehicleDetails();
+}
+
+function updateSelectedVehicleDetails() {
+  const vehicle = vehicleRecords.find(item => item.nome === veiculoSelect.value);
+  document.getElementById('equipamento').value = vehicle?.descricao || '';
+  document.getElementById('placa').value = vehicle?.placa || '';
 }
 
 function renderVehicleList() {
@@ -510,7 +575,7 @@ function renderVehicleList() {
 
   vehicleList.innerHTML = appState.vehicles.map((vehicle, index) => `
     <div class="record-row">
-      <span>${escapeHtml(vehicle)}</span>
+      <span>${escapeHtml(vehicle)}<small>${escapeHtml(vehicleRecords.find(item => item.nome === vehicle)?.descricao || 'Sem descrição')} · ${escapeHtml(vehicleRecords.find(item => item.nome === vehicle)?.placa || 'Sem placa')}</small></span>
       <div class="record-actions">
         <button type="button" class="small-btn" data-action="edit-vehicle" data-index="${index}">Editar</button>
         <button type="button" class="small-btn danger-btn" data-action="delete-vehicle" data-index="${index}">Apagar</button>
@@ -613,7 +678,7 @@ function deleteUser(username) {
   if (appState.editingUsername === username) resetUserEdit();
 }
 
-async function updateVehicle(value) {
+async function updateVehicle(value, descricao, placa) {
   const editingVehicle = appState.editingVehicle;
   if (editingVehicle !== null) {
     const duplicate = appState.vehicles.some((vehicle, index) => index !== editingVehicle && vehicle.toLowerCase() === value.toLowerCase());
@@ -623,14 +688,22 @@ async function updateVehicle(value) {
     }
 
     const oldName = appState.vehicles[editingVehicle];
-    appState.vehicles[editingVehicle] = value;
+    const wasSelected = veiculoSelect.value === oldName;
     if (supabaseReady) {
       const record = vehicleRecords.find(item => item.nome === oldName);
-      const { error } = await supabaseClient.from('equipamentos').update({ nome: value }).eq('id', record.id);
-      if (error) return alert(`Não foi possível atualizar o equipamento: ${error.message}`);
+      const { data, error } = await supabaseClient.from('equipamentos')
+        .update({ nome: value, descricao, placa: placa || null })
+        .eq('id', record.id).select('id,nome,descricao,placa,ativo').single();
+      if (error) return alert(vehicleDescriptionColumnAvailable
+        ? `Não foi possível atualizar o equipamento: ${error.message}`
+        : 'Execute supabase/schema.sql no SQL Editor do Supabase para habilitar o campo de descrição do equipamento.');
+      vehicleRecords = vehicleRecords.map(item => item.id === data.id ? data : item);
+      appState.vehicles[editingVehicle] = value;
       await loadSupabaseData();
+    } else {
+      appState.vehicles[editingVehicle] = value;
     }
-    if (veiculoSelect.value === oldName) veiculoSelect.value = value;
+    if (wasSelected) veiculoSelect.value = value;
     saveAuditEntry('veiculo_editado', { description: `Veículo ${oldName} alterado para ${value}` });
     finishVehicleEdit();
   } else if (appState.vehicles.some(vehicle => vehicle.toLowerCase() === value.toLowerCase())) {
@@ -639,9 +712,11 @@ async function updateVehicle(value) {
   } else {
     if (supabaseReady) {
       const { data, error } = await supabaseClient.from('equipamentos').insert({
-        nome: value, criado_por: getCurrentUser().id
-      }).select('id,nome,placa,ativo').single();
-      if (error) return alert(`Não foi possível cadastrar o equipamento: ${error.message}`);
+        nome: value, descricao, placa: placa || null, criado_por: getCurrentUser().id
+      }).select('id,nome,descricao,placa,ativo').single();
+      if (error) return alert(vehicleDescriptionColumnAvailable
+        ? `Não foi possível cadastrar o equipamento: ${error.message}`
+        : 'Execute supabase/schema.sql no SQL Editor do Supabase para habilitar o campo de descrição do equipamento.');
       vehicleRecords.push(data);
     }
     appState.vehicles.push(value);
@@ -651,12 +726,15 @@ async function updateVehicle(value) {
   if (!supabaseReady) localStorage.setItem('checklist-vehicles-v1', JSON.stringify(appState.vehicles));
   populateVehicleOptions();
   if (appState.vehicles.includes(value)) veiculoSelect.value = value;
+  updateSelectedVehicleDetails();
 }
 
 function finishVehicleEdit() {
   appState.editingVehicle = null;
   novoVeiculoInput.value = '';
-  adicionarVeiculoBtn.textContent = 'Adicionar veículo';
+  document.getElementById('novoEquipamentoDescricao').value = '';
+  document.getElementById('novaPlaca').value = '';
+  adicionarVeiculoBtn.textContent = 'Cadastrar veículo';
   document.getElementById('cancelarEdicaoVeiculo').classList.add('hidden');
 }
 
@@ -681,14 +759,16 @@ async function deleteVehicle(index) {
 
 async function addVehicle() {
   const value = novoVeiculoInput.value.trim();
-  if (!value) {
-    alert('Digite o nome do veículo antes de adicionar.');
+  const descricao = document.getElementById('novoEquipamentoDescricao').value.trim();
+  const placa = document.getElementById('novaPlaca').value.trim();
+  if (!value || !descricao || !placa) {
+    alert('Preencha o nome do veículo, a descrição do equipamento e a placa.');
     return;
   }
 
   const wasEditing = appState.editingVehicle !== null;
-  await updateVehicle(value);
-  if (!appState.editingVehicle && !wasEditing) novoVeiculoInput.value = '';
+  await updateVehicle(value, descricao, placa);
+  if (appState.editingVehicle === null && (wasEditing || appState.vehicles.includes(value))) finishVehicleEdit();
 }
 
 function getHistory() {
@@ -836,10 +916,10 @@ async function saveInspection() {
     horimetroDesabilitado: document.getElementById('horimetroDesabilitado').checked,
     quilometragem: document.getElementById('quilometragem').value,
     quilometragemDesabilitada: document.getElementById('quilometragemDesabilitada').checked,
-    naoConformidade: document.getElementById('naoConformidade').value,
+    naoConformidade: getNonconformitySummary(),
     ordemServico: document.getElementById('ordemServico').value,
     aptidaoSistema: aptidaoSistema.textContent,
-    respostas: {},
+    respostas: collectAnswers(),
     createdBy: existing?.createdBy || (currentUser ? currentUser.username : 'Sistema'),
     createdAt: existing?.createdAt || now,
     updatedBy: currentUser ? currentUser.username : 'Sistema',
@@ -848,15 +928,8 @@ async function saveInspection() {
     logoutAt: currentUser ? currentUser.logoutAt || null : null
   };
 
-  document.querySelectorAll('input[type="radio"]:checked').forEach(radio => {
-    payload.respostas[radio.name] = radio.value;
-  });
-
   payload.fotos = supabaseReady ? {} : appState.photos;
-  payload.itens = [...document.querySelectorAll('#rfList .item-card, #rnfList .item-card')].map(card => ({
-    id: card.dataset.id,
-    name: card.querySelector('h3')?.textContent.replace(/^\d+\.\s*/, '') || card.dataset.id
-  }));
+  payload.itens = [...getAllRfItems(), ...rnfItems].map(item => ({ id: item.id, name: item.name }));
 
   if (supabaseReady) {
     const selectedVehicle = vehicleRecords.find(item => item.nome === payload.veiculo);
@@ -963,6 +1036,7 @@ function loadSavedInspection() {
     const data = JSON.parse(saved);
     if (data.veiculo) {
       veiculoSelect.value = data.veiculo;
+      updateSelectedVehicleDetails();
     }
     document.getElementById('equipamento').value = data.equipamento || '';
     document.getElementById('placa').value = data.placa || '';
@@ -974,10 +1048,10 @@ function loadSavedInspection() {
     document.getElementById('quilometragem').value = data.quilometragem || '';
     document.getElementById('quilometragemDesabilitada').checked = Boolean(data.quilometragemDesabilitada);
     document.getElementById('quilometragem').disabled = Boolean(data.quilometragemDesabilitada);
-    document.getElementById('naoConformidade').value = data.naoConformidade || '';
     document.getElementById('ordemServico').value = data.ordemServico || 'nao';
 
     if (data.respostas) {
+      appState.answers = { ...data.respostas };
       Object.entries(data.respostas).forEach(([name, value]) => {
         const selected = document.querySelector(`input[name="${name}"][value="${value}"]`);
         if (selected) {
@@ -1018,19 +1092,12 @@ async function openInspectionPdf() {
     horimetroDesabilitado: document.getElementById('horimetroDesabilitado').checked,
     quilometragem: document.getElementById('quilometragem').value,
     quilometragemDesabilitada: document.getElementById('quilometragemDesabilitada').checked,
-    naoConformidade: document.getElementById('naoConformidade').value,
+    naoConformidade: getNonconformitySummary(),
     ordemServico: document.getElementById('ordemServico').value,
     aptidaoSistema: aptidaoSistema.textContent,
-    respostas: {},
-    itens: [...document.querySelectorAll('#rfList .item-card, #rnfList .item-card')].map(card => ({
-      id: card.dataset.id,
-      name: card.querySelector('h3')?.textContent.replace(/^\d+\.\s*/, '') || card.dataset.id
-    }))
+    respostas: collectAnswers(),
+    itens: [...getAllRfItems(), ...rnfItems].map(item => ({ id: item.id, name: item.name }))
   });
-  document.querySelectorAll('input[type="radio"]:checked').forEach(radio => {
-    payload.respostas[radio.name] = radio.value;
-  });
-
   try {
     const response = await fetch('/api/inspections/pdf', {
       method: 'POST',
@@ -1120,6 +1187,7 @@ function ensureSession() {
     updateUserBadge();
     document.getElementById('userManagement').classList.add('hidden');
     document.querySelector('.management-panel').classList.toggle('hidden', currentUser.perfil !== 'admin');
+    document.querySelector('.vehicle-box').classList.toggle('hidden', currentUser.perfil !== 'admin');
   } else {
     authPanel.classList.remove('hidden');
     appContent.classList.add('hidden');
@@ -1154,13 +1222,19 @@ function bindAuthEvents() {
             setAuthMode('login');
           }
         } else {
+          console.log('[Supabase][login] iniciando autenticação');
           const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
-          if (error) throw error;
+          if (error) {
+            logSupabaseError('login', error);
+            throw error;
+          }
+          console.log('[Supabase][login] autenticação concluída', { userId: data.user?.id });
           await applySession(data.session);
           saveAuditEntry('login', { timestamp: new Date().toISOString() });
           authMessage('Login realizado com sucesso!');
         }
       } catch (error) {
+        logSupabaseError('fluxo de login', error);
         authMessage(error.message || 'Não foi possível autenticar.', true);
       } finally { submit.disabled = false; }
     })();
@@ -1174,6 +1248,7 @@ function bindAuthEvents() {
 }
 
 adicionarVeiculoBtn.addEventListener('click', addVehicle);
+veiculoSelect.addEventListener('change', updateSelectedVehicleDetails);
 document.getElementById('cancelarEdicaoVeiculo').addEventListener('click', finishVehicleEdit);
 novoVeiculoInput.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {
@@ -1189,7 +1264,11 @@ vehicleList.addEventListener('click', event => {
   const index = Number(button.dataset.index);
   if (button.dataset.action === 'edit-vehicle') {
     appState.editingVehicle = index;
-    novoVeiculoInput.value = appState.vehicles[index];
+    const vehicleName = appState.vehicles[index];
+    const vehicle = vehicleRecords.find(item => item.nome === vehicleName);
+    novoVeiculoInput.value = vehicleName;
+    document.getElementById('novoEquipamentoDescricao').value = vehicle?.descricao || '';
+    document.getElementById('novaPlaca').value = vehicle?.placa || '';
     adicionarVeiculoBtn.textContent = 'Salvar veículo';
     document.getElementById('cancelarEdicaoVeiculo').classList.remove('hidden');
     novoVeiculoInput.focus();

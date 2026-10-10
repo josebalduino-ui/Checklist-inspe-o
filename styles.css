@@ -247,6 +247,14 @@ textarea {
   resize: vertical;
 }
 
+.summary-generated:disabled,
+.summary-generated[readonly] {
+  background: #f7f9fc;
+  color: var(--text);
+  opacity: 1;
+  cursor: default;
+}
+
 .header-actions {
   display: flex;
   align-items: center;
@@ -309,8 +317,11 @@ textarea {
   padding: 12px;
 }
 
-.vehicle-input-wrap {
-  flex: 1;
+.vehicle-registration-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 10px;
 }
 
 .management-grid {
@@ -1006,6 +1017,10 @@ textarea {
 
   .vehicle-box {
     grid-column: auto;
+  }
+
+  .vehicle-registration-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .checklist-tabs {

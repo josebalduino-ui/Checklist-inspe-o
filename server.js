@@ -1,5 +1,3 @@
-require('dotenv').config();
-
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -169,13 +167,6 @@ const server = http.createServer(async (request, response) => {
   const url = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
   if (request.method === 'GET' && url.pathname === '/api/health') {
     sendJson(response, 200, { ok: true });
-    return;
-  }
-  if (request.method === 'GET' && url.pathname === '/api/config') {
-    sendJson(response, 200, {
-      supabaseUrl: process.env.SUPABASE_URL || '',
-      supabaseAnonKey: process.env.SUPABASE_ANON_KEY || ''
-    });
     return;
   }
   if (request.method === 'POST' && url.pathname === '/api/inspections/pdf') {

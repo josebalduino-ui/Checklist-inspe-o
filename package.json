@@ -7,10 +7,9 @@
     "node": ">=22"
   },
   "scripts": {
-    "start": "node --env-file-if-exists=.env server.js"
+    "start": "node server.js"
   },
   "dependencies": {
-    "dotenv": "^16.4.7",
     "pdfkit": "^0.17.1"
   }
 }
