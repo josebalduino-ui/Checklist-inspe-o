@@ -177,6 +177,19 @@
             <span class="badge badge-blue">RF</span>
           </div>
 
+          <section class="meter-readings" aria-label="Leituras do equipamento">
+            <div class="meter-field">
+              <label for="horimetro">Horímetro (horas)</label>
+              <input id="horimetro" type="number" min="0" step="0.1" placeholder="Ex.: 1250,5" />
+              <label class="meter-disabled"><input id="horimetroDesabilitado" type="checkbox" /> Desabilitar anotação</label>
+            </div>
+            <div class="meter-field">
+              <label for="quilometragem">Quilometragem (km)</label>
+              <input id="quilometragem" type="number" min="0" step="1" placeholder="Ex.: 85420" />
+              <label class="meter-disabled"><input id="quilometragemDesabilitada" type="checkbox" /> Desabilitar anotação</label>
+            </div>
+          </section>
+
           <div class="filter-bar" id="filterBar">
             <button class="filter-btn active" data-filter="todos">Todos</button>
             <button class="filter-btn" data-filter="operacao">Operação</button>

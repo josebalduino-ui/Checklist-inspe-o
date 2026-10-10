@@ -86,6 +86,16 @@ function getAllRfItems() {
 
 const rfList = document.getElementById('rfList');
 const rnfList = document.getElementById('rnfList');
+const meterFields = [
+  { input: document.getElementById('horimetro'), disabled: document.getElementById('horimetroDesabilitado') },
+  { input: document.getElementById('quilometragem'), disabled: document.getElementById('quilometragemDesabilitada') }
+];
+meterFields.forEach(({ input, disabled }) => {
+  disabled.addEventListener('change', () => {
+    input.disabled = disabled.checked;
+    if (disabled.checked) input.value = '';
+  });
+});
 const totalItens = document.getElementById('totalItens');
 const itensConformes = document.getElementById('itensConformes');
 const itensNaoConformes = document.getElementById('itensNaoConformes');
@@ -711,6 +721,10 @@ async function saveInspection() {
     placa: document.getElementById('placa').value,
     dataInspecao: document.getElementById('dataInspecao').value,
     responsavel: document.getElementById('responsavel').value,
+    horimetro: document.getElementById('horimetro').value,
+    horimetroDesabilitado: document.getElementById('horimetroDesabilitado').checked,
+    quilometragem: document.getElementById('quilometragem').value,
+    quilometragemDesabilitada: document.getElementById('quilometragemDesabilitada').checked,
     naoConformidade: document.getElementById('naoConformidade').value,
     ordemServico: document.getElementById('ordemServico').value,
     aptidaoSistema: aptidaoSistema.textContent,
@@ -732,9 +746,6 @@ async function saveInspection() {
     id: card.dataset.id,
     name: card.querySelector('h3')?.textContent.replace(/^\d+\.\s*/, '') || card.dataset.id
   }));
-  payload.admins = getUsers().filter(user => user.perfil === 'admin').map(({ username, perfil, email, phone }) => ({
-    username, perfil, email, phone
-  }));
   saveHistory(payload);
   localStorage.setItem('checklist-inspecao-v2', JSON.stringify(payload));
   saveAuditEntry('relatorio_salvo', {
@@ -745,7 +756,7 @@ async function saveInspection() {
   renderHistory();
 
   try {
-    const response = await fetch('/api/inspections', {
+    const response = await fetch('/api/inspections/pdf', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -764,11 +775,9 @@ async function saveInspection() {
     pdfLink.classList.remove('hidden');
     pdfLink.click();
 
-    const emailResult = response.headers.get('X-Email-Result') || 'sem confirmação';
-    const whatsappResult = response.headers.get('X-WhatsApp-Result') || 'sem confirmação';
-    alert(`Inspeção salva e PDF gerado.\nE-mail: ${emailResult}\nWhatsApp: ${whatsappResult}`);
+    alert('Inspeção salva e PDF gerado.');
   } catch (error) {
-    alert(`Inspeção salva no navegador, mas não foi possível gerar/enviar o PDF pelo servidor.\n${error.message}`);
+    alert(`Inspeção salva no navegador, mas não foi possível gerar o PDF pelo servidor.\n${error.message}`);
   }
 }
 
@@ -785,6 +794,12 @@ function loadSavedInspection() {
     document.getElementById('placa').value = data.placa || '';
     document.getElementById('dataInspecao').value = data.dataInspecao || '';
     document.getElementById('responsavel').value = data.responsavel || '';
+    document.getElementById('horimetro').value = data.horimetro || '';
+    document.getElementById('horimetroDesabilitado').checked = Boolean(data.horimetroDesabilitado);
+    document.getElementById('horimetro').disabled = Boolean(data.horimetroDesabilitado);
+    document.getElementById('quilometragem').value = data.quilometragem || '';
+    document.getElementById('quilometragemDesabilitada').checked = Boolean(data.quilometragemDesabilitada);
+    document.getElementById('quilometragem').disabled = Boolean(data.quilometragemDesabilitada);
     document.getElementById('naoConformidade').value = data.naoConformidade || '';
     document.getElementById('ordemServico').value = data.ordemServico || 'nao';
 
@@ -814,6 +829,55 @@ function loadSavedInspection() {
     }
   } catch (error) {
     console.error('Erro ao carregar inspeção salva:', error);
+  }
+}
+
+async function openInspectionPdf() {
+  const payload = JSON.parse(localStorage.getItem('checklist-inspecao-v2') || '{}');
+  Object.assign(payload, {
+    veiculo: veiculoSelect.value,
+    equipamento: document.getElementById('equipamento').value,
+    placa: document.getElementById('placa').value,
+    dataInspecao: document.getElementById('dataInspecao').value,
+    responsavel: document.getElementById('responsavel').value,
+    horimetro: document.getElementById('horimetro').value,
+    horimetroDesabilitado: document.getElementById('horimetroDesabilitado').checked,
+    quilometragem: document.getElementById('quilometragem').value,
+    quilometragemDesabilitada: document.getElementById('quilometragemDesabilitada').checked,
+    naoConformidade: document.getElementById('naoConformidade').value,
+    ordemServico: document.getElementById('ordemServico').value,
+    aptidaoSistema: aptidaoSistema.textContent,
+    respostas: {},
+    itens: [...document.querySelectorAll('#rfList .item-card, #rnfList .item-card')].map(card => ({
+      id: card.dataset.id,
+      name: card.querySelector('h3')?.textContent.replace(/^\d+\.\s*/, '') || card.dataset.id
+    }))
+  });
+  document.querySelectorAll('input[type="radio"]:checked').forEach(radio => {
+    payload.respostas[radio.name] = radio.value;
+  });
+
+  try {
+    const response = await fetch('/api/inspections/pdf', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({}));
+      throw new Error(result.error || 'Não foi possível gerar o PDF.');
+    }
+    const pdfUrl = URL.createObjectURL(await response.blob());
+    const link = document.createElement('a');
+    const safeName = String(payload.placa || payload.veiculo || 'inspecao').replace(/[^a-z0-9_-]/gi, '-');
+    link.href = pdfUrl;
+    link.download = `relatorio-${safeName}.pdf`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(pdfUrl), 60000);
+  } catch (error) {
+    alert(`Não foi possível gerar o PDF.\n${error.message}`);
   }
 }
 
@@ -1019,6 +1083,6 @@ setAuthMode('login');
 ensureSession();
 
 salvarChecklistBtn.addEventListener('click', saveInspection);
-exportPdfBtn.addEventListener('click', () => window.print());
+exportPdfBtn.addEventListener('click', openInspectionPdf);
 exportCsvBtn.addEventListener('click', exportCsv);
 document.getElementById('adicionarItemChecklist').addEventListener('click', addCustomItem);

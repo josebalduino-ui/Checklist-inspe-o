@@ -4,7 +4,6 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const PDFDocument = require('pdfkit');
-const nodemailer = require('nodemailer');
 
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT || 8000);
@@ -96,6 +95,10 @@ function createInspectionPdf(inspection) {
     line('Data da inspeção', inspection.dataInspecao);
     line('Responsável', inspection.responsavel);
 
+    section('Leituras do equipamento');
+    line('Horímetro', inspection.horimetroDesabilitado ? 'Anotação desabilitada' : inspection.horimetro ? `${inspection.horimetro} h` : 'Não informado');
+    line('Quilometragem', inspection.quilometragemDesabilitada ? 'Anotação desabilitada' : inspection.quilometragem ? `${inspection.quilometragem} km` : 'Não informado');
+
     section('Resultado');
     line('Aptidão para rodar', inspection.aptidaoSistema);
     line('Ordem de serviço', inspection.ordemServico === 'sim' ? 'Necessária' : 'Não necessária');
@@ -140,108 +143,6 @@ function createInspectionPdf(inspection) {
   });
 }
 
-function getAdminRecipients(inspection) {
-  const admins = Array.isArray(inspection.admins) ? inspection.admins : [];
-  return admins.filter(admin => admin && admin.perfil === 'admin').map(admin => ({
-    email: String(admin.email || '').trim(),
-    phone: String(admin.phone || '').replace(/\D/g, '')
-  }));
-}
-
-function emailIsConfigured() {
-  return Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASSWORD && process.env.MAIL_FROM);
-}
-
-async function sendEmail(pdf, inspection, recipients) {
-  const emails = [...new Set(recipients.map(recipient => recipient.email).filter(email => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)))];
-  if (!emailIsConfigured()) return { status: 'não configurado', sent: 0, failed: 0 };
-  if (!emails.length) return { status: 'sem destinatários', sent: 0, failed: 0 };
-
-  const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: Number(process.env.SMTP_PORT || 587),
-    secure: String(process.env.SMTP_SECURE).toLowerCase() === 'true',
-    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD }
-  });
-  try {
-    await transporter.sendMail({
-      from: process.env.MAIL_FROM,
-      to: emails,
-      subject: `Inspeção ${safeText(inspection.veiculo, 'de equipamento')} — ${safeText(inspection.aptidaoSistema)}`,
-      text: `Segue em anexo o relatório da inspeção de ${safeText(inspection.veiculo, 'equipamento')} realizada por ${safeText(inspection.responsavel)}.`,
-      attachments: [{ filename: 'relatorio-inspecao.pdf', content: pdf, contentType: 'application/pdf' }]
-    });
-    return { status: 'enviado', sent: emails.length, failed: 0 };
-  } catch (error) {
-    console.error('Falha no envio de e-mail:', error.message);
-    return { status: 'falha no envio', sent: 0, failed: emails.length };
-  } finally {
-    transporter.close();
-  }
-}
-
-function whatsappIsConfigured() {
-  return Boolean(process.env.WHATSAPP_API_VERSION && process.env.WHATSAPP_PHONE_NUMBER_ID && process.env.WHATSAPP_ACCESS_TOKEN);
-}
-
-async function sendWhatsAppDocument(pdf, inspection, recipients) {
-  const phones = [...new Set(recipients.map(recipient => recipient.phone).filter(phone => /^\d{10,15}$/.test(phone)))];
-  if (!whatsappIsConfigured()) return { status: 'não configurado', sent: 0, failed: 0 };
-  if (!phones.length) return { status: 'sem destinatários', sent: 0, failed: 0 };
-
-  const version = process.env.WHATSAPP_API_VERSION.replace(/[^v\d.]/g, '');
-  const phoneNumberId = encodeURIComponent(process.env.WHATSAPP_PHONE_NUMBER_ID);
-  const baseUrl = `https://graph.facebook.com/${version}`;
-  let mediaId;
-  try {
-    const form = new FormData();
-    form.set('messaging_product', 'whatsapp');
-    form.set('type', 'application/pdf');
-    form.set('file', new Blob([pdf], { type: 'application/pdf' }), 'relatorio-inspecao.pdf');
-    const uploadResponse = await fetch(`${baseUrl}/${phoneNumberId}/media`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}` },
-      body: form
-    });
-    const upload = await uploadResponse.json();
-    if (!uploadResponse.ok || !upload.id) throw new Error(upload.error?.message || 'Falha ao enviar o PDF para o WhatsApp.');
-    mediaId = upload.id;
-  } catch (error) {
-    console.error('Falha ao preparar PDF para WhatsApp:', error.message);
-    return { status: 'falha no envio', sent: 0, failed: phones.length };
-  }
-
-  let sent = 0;
-  for (const phone of phones) {
-    try {
-      const response = await fetch(`${baseUrl}/${phoneNumberId}/messages`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          messaging_product: 'whatsapp',
-          recipient_type: 'individual',
-          to: phone,
-          type: 'document',
-          document: {
-            id: mediaId,
-            filename: 'relatorio-inspecao.pdf',
-            caption: `Relatório da inspeção de ${safeText(inspection.veiculo, 'equipamento')}`
-          }
-        })
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error?.message || 'Falha ao enviar documento.');
-      sent += 1;
-    } catch (error) {
-      console.error(`Falha no envio de WhatsApp para ${phone}:`, error.message);
-    }
-  }
-  return { status: sent === phones.length ? 'enviado' : sent ? 'parcial' : 'falha no envio', sent, failed: phones.length - sent };
-}
-
 function serveStatic(request, response, url) {
   const requestedPath = decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname);
   const filePath = path.resolve(ROOT, `.${requestedPath}`);
@@ -270,7 +171,7 @@ const server = http.createServer(async (request, response) => {
     sendJson(response, 200, { ok: true });
     return;
   }
-  if (request.method === 'POST' && url.pathname === '/api/inspections') {
+  if (request.method === 'POST' && url.pathname === '/api/inspections/pdf') {
     try {
       const inspection = await readJson(request);
       if (!inspection || typeof inspection !== 'object' || Array.isArray(inspection)) {
@@ -278,22 +179,15 @@ const server = http.createServer(async (request, response) => {
         return;
       }
       const pdf = await createInspectionPdf(inspection);
-      const recipients = getAdminRecipients(inspection);
-      const [email, whatsapp] = await Promise.all([
-        sendEmail(pdf, inspection, recipients),
-        sendWhatsAppDocument(pdf, inspection, recipients)
-      ]);
       const safeVehicle = String(inspection.placa || inspection.veiculo || 'inspecao').replace(/[^a-z0-9_-]/gi, '-').slice(0, 50);
       response.writeHead(200, {
         'Content-Type': 'application/pdf',
         'Content-Disposition': `attachment; filename="relatorio-${safeVehicle}.pdf"`,
-        'Cache-Control': 'no-store',
-        'X-Email-Result': `${email.status}; enviados=${email.sent}; falhas=${email.failed}`,
-        'X-WhatsApp-Result': `${whatsapp.status}; enviados=${whatsapp.sent}; falhas=${whatsapp.failed}`
+        'Cache-Control': 'no-store'
       });
       response.end(pdf);
     } catch (error) {
-      console.error('Erro ao processar inspeção:', error.message);
+      console.error('Erro ao gerar PDF:', error.message);
       sendJson(response, error.statusCode || 500, { error: error.statusCode ? error.message : 'Não foi possível gerar o relatório.' });
     }
     return;
