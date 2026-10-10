@@ -50,6 +50,76 @@ const appState = {
   editingUsername: null
 };
 
+let supabaseClient = null;
+let vehicleRecords = [];
+let checklistRecords = [];
+let supabaseReady = false;
+
+async function initializeSupabase() {
+  const configResponse = await fetch('/api/config');
+  const config = await configResponse.json();
+  if (!config.supabaseUrl || !config.supabaseAnonKey || !window.supabase?.createClient) {
+    throw new Error('Configure SUPABASE_URL e SUPABASE_ANON_KEY no arquivo .env e reinicie o servidor.');
+  }
+  supabaseClient = window.supabase.createClient(config.supabaseUrl, config.supabaseAnonKey);
+  supabaseReady = true;
+  const { data: { session }, error } = await supabaseClient.auth.getSession();
+  if (error) throw error;
+  if (session) await applySession(session);
+}
+
+async function applySession(session) {
+  if (!session?.user) return;
+  const { data: profile, error } = await supabaseClient.from('perfis')
+    .select('id,nome_usuario,perfil,telefone').eq('id', session.user.id).single();
+  if (error) throw error;
+  localStorage.setItem(STORAGE_KEYS.currentUser, JSON.stringify({
+    id: profile.id, username: profile.nome_usuario, perfil: profile.perfil,
+    email: session.user.email, phone: profile.telefone
+  }));
+  await loadSupabaseData();
+  ensureSession();
+}
+
+async function loadSupabaseData() {
+  const [vehiclesResult, itemsResult, inspectionsResult, auditResult] = await Promise.all([
+    supabaseClient.from('equipamentos').select('id,nome,placa,ativo').eq('ativo', true).order('nome'),
+    supabaseClient.from('itens_checklist').select('id,codigo,nome,descricao,categoria,personalizado').eq('ativo', true).order('nome'),
+    supabaseClient.from('inspecoes').select('*,respostas_inspecao(*),fotos_inspecao(*)').order('criado_em', { ascending: false }),
+    supabaseClient.from('registros_auditoria').select('*').order('criado_em', { ascending: false }).limit(50)
+  ]);
+  for (const result of [vehiclesResult, itemsResult, inspectionsResult, auditResult]) {
+    if (result.error) throw result.error;
+  }
+  vehicleRecords = vehiclesResult.data || [];
+  appState.vehicles = vehicleRecords.map(item => item.nome);
+  checklistRecords = itemsResult.data || [];
+  const customItems = checklistRecords.filter(item => item.personalizado).map(item => ({
+    id: item.codigo, name: item.nome, description: item.descricao, category: item.categoria
+  }));
+  localStorage.setItem(STORAGE_KEYS.customItems, JSON.stringify(customItems));
+  const history = (inspectionsResult.data || []).map(row => ({
+    id: row.id, veiculo: row.nome_veiculo_snapshot, equipamento: row.nome_equipamento,
+    placa: row.placa, dataInspecao: row.data_inspecao, responsavel: row.responsavel,
+    horimetro: row.horimetro, horimetroDesabilitado: row.horimetro_desabilitado,
+    quilometragem: row.quilometragem_km, quilometragemDesabilitada: row.quilometragem_desabilitada,
+    naoConformidade: row.observacoes_nao_conformidade, ordemServico: row.ordem_servico_necessaria ? 'sim' : 'nao',
+    aptidaoSistema: row.aptidao, respostas: Object.fromEntries((row.respostas_inspecao || []).map(a => [a.codigo_item_snapshot, a.situacao])),
+    itens: (row.respostas_inspecao || []).map(a => ({ id: a.codigo_item_snapshot, name: a.nome_item_snapshot })),
+    createdAt: row.criado_em
+  }));
+  localStorage.setItem(STORAGE_KEYS.history, JSON.stringify(history));
+  const audit = (auditResult.data || []).map(row => ({
+    id: row.id, action: row.acao, user: row.nome_usuario_snapshot,
+    timestamp: row.criado_em, details: row.detalhes
+  }));
+  localStorage.setItem(STORAGE_KEYS.audit, JSON.stringify(audit));
+  populateVehicleOptions();
+  renderChecklist(rfList, getAllRfItems(), 'RF');
+  renderHistory();
+  renderAuditLog();
+}
+
 function getStoredVehicles() {
   const raw = localStorage.getItem('checklist-vehicles-v1');
   if (raw) {
@@ -198,7 +268,7 @@ function renderChecklist(listEl, items, type) {
         </div>
 
         <div class="attachment-box">
-          <input class="hidden-input" id="file-${item.id}" type="file" accept="image/*" />
+          <input class="hidden-input" id="file-${item.id}" type="file" accept="image/jpeg,image/png,image/webp" multiple />
           <a href="#" class="attach-link" data-trigger="file-${item.id}">Anexar foto do problema</a>
           <div class="preview-grid" id="preview-${item.id}"></div>
         </div>
@@ -399,14 +469,25 @@ function addCustomItem() {
   }
 
   const customItems = getCustomItems();
-  customItems.push({
+  const item = {
     id: `custom-${Date.now()}`,
     name,
     description,
     category
-  });
+  };
 
-  localStorage.setItem(STORAGE_KEYS.customItems, JSON.stringify(customItems));
+  if (supabaseReady) {
+    const user = getCurrentUser();
+    supabaseClient.from('itens_checklist').insert({
+      codigo: item.id, nome: name, descricao: description, categoria: category,
+      personalizado: true, criado_por: user.id
+    }).then(async ({ error }) => {
+      if (error) return alert(`Não foi possível salvar o item: ${error.message}`);
+      await loadSupabaseData();
+    });
+  } else customItems.push(item);
+
+  if (!supabaseReady) localStorage.setItem(STORAGE_KEYS.customItems, JSON.stringify(customItems));
   document.getElementById('customItemName').value = '';
   document.getElementById('customItemDescription').value = '';
   renderChecklist(rfList, getAllRfItems(), 'RF');
@@ -532,7 +613,7 @@ function deleteUser(username) {
   if (appState.editingUsername === username) resetUserEdit();
 }
 
-function updateVehicle(value) {
+async function updateVehicle(value) {
   const editingVehicle = appState.editingVehicle;
   if (editingVehicle !== null) {
     const duplicate = appState.vehicles.some((vehicle, index) => index !== editingVehicle && vehicle.toLowerCase() === value.toLowerCase());
@@ -543,6 +624,12 @@ function updateVehicle(value) {
 
     const oldName = appState.vehicles[editingVehicle];
     appState.vehicles[editingVehicle] = value;
+    if (supabaseReady) {
+      const record = vehicleRecords.find(item => item.nome === oldName);
+      const { error } = await supabaseClient.from('equipamentos').update({ nome: value }).eq('id', record.id);
+      if (error) return alert(`Não foi possível atualizar o equipamento: ${error.message}`);
+      await loadSupabaseData();
+    }
     if (veiculoSelect.value === oldName) veiculoSelect.value = value;
     saveAuditEntry('veiculo_editado', { description: `Veículo ${oldName} alterado para ${value}` });
     finishVehicleEdit();
@@ -550,11 +637,18 @@ function updateVehicle(value) {
     alert('Esse veículo já está cadastrado.');
     return;
   } else {
+    if (supabaseReady) {
+      const { data, error } = await supabaseClient.from('equipamentos').insert({
+        nome: value, criado_por: getCurrentUser().id
+      }).select('id,nome,placa,ativo').single();
+      if (error) return alert(`Não foi possível cadastrar o equipamento: ${error.message}`);
+      vehicleRecords.push(data);
+    }
     appState.vehicles.push(value);
     veiculoSelect.value = value;
   }
 
-  localStorage.setItem('checklist-vehicles-v1', JSON.stringify(appState.vehicles));
+  if (!supabaseReady) localStorage.setItem('checklist-vehicles-v1', JSON.stringify(appState.vehicles));
   populateVehicleOptions();
   if (appState.vehicles.includes(value)) veiculoSelect.value = value;
 }
@@ -566,20 +660,26 @@ function finishVehicleEdit() {
   document.getElementById('cancelarEdicaoVeiculo').classList.add('hidden');
 }
 
-function deleteVehicle(index) {
+async function deleteVehicle(index) {
   const vehicle = appState.vehicles[index];
   if (!vehicle || !window.confirm(`Apagar o veículo "${vehicle}"?`)) return;
 
+  if (supabaseReady) {
+    const record = vehicleRecords.find(item => item.nome === vehicle);
+    const { error } = await supabaseClient.from('equipamentos').update({ ativo: false }).eq('id', record.id);
+    if (error) return alert(`Não foi possível remover o equipamento: ${error.message}`);
+    vehicleRecords = vehicleRecords.filter(item => item.id !== record.id);
+  }
   appState.vehicles.splice(index, 1);
   if (veiculoSelect.value === vehicle) veiculoSelect.value = '';
   if (appState.editingVehicle === index) finishVehicleEdit();
   else if (appState.editingVehicle > index) appState.editingVehicle -= 1;
-  localStorage.setItem('checklist-vehicles-v1', JSON.stringify(appState.vehicles));
+  if (!supabaseReady) localStorage.setItem('checklist-vehicles-v1', JSON.stringify(appState.vehicles));
   populateVehicleOptions();
   saveAuditEntry('veiculo_apagado', { description: `Veículo ${vehicle} apagado` });
 }
 
-function addVehicle() {
+async function addVehicle() {
   const value = novoVeiculoInput.value.trim();
   if (!value) {
     alert('Digite o nome do veículo antes de adicionar.');
@@ -587,7 +687,7 @@ function addVehicle() {
   }
 
   const wasEditing = appState.editingVehicle !== null;
-  updateVehicle(value);
+  await updateVehicle(value);
   if (!appState.editingVehicle && !wasEditing) novoVeiculoInput.value = '';
 }
 
@@ -598,7 +698,9 @@ function getHistory() {
 
 function saveHistory(entry) {
   const history = getHistory();
-  history.unshift(entry);
+  const index = history.findIndex(item => item.id && item.id === entry.id);
+  if (index >= 0) history[index] = entry;
+  else history.unshift(entry);
   localStorage.setItem(STORAGE_KEYS.history, JSON.stringify(history));
 }
 
@@ -621,6 +723,15 @@ function saveAuditEntry(action, details = {}) {
   const log = getAuditLog();
   log.unshift(auditEntry);
   localStorage.setItem(STORAGE_KEYS.audit, JSON.stringify(log.slice(0, 50)));
+  if (supabaseReady && currentUser?.id) {
+    supabaseClient.from('registros_auditoria').insert({
+      usuario_id: currentUser.id, nome_usuario_snapshot: currentUser.username,
+      acao: action, tipo_entidade: details.entityType || null,
+      entidade_id: details.entityId || null, detalhes: details
+    }).then(({ error }) => {
+      if (error) console.error('Falha ao gravar auditoria:', error.message);
+    });
+  }
   renderAuditLog();
 }
 
@@ -741,11 +852,74 @@ async function saveInspection() {
     payload.respostas[radio.name] = radio.value;
   });
 
-  payload.fotos = appState.photos;
+  payload.fotos = supabaseReady ? {} : appState.photos;
   payload.itens = [...document.querySelectorAll('#rfList .item-card, #rnfList .item-card')].map(card => ({
     id: card.dataset.id,
     name: card.querySelector('h3')?.textContent.replace(/^\d+\.\s*/, '') || card.dataset.id
   }));
+
+  if (supabaseReady) {
+    const selectedVehicle = vehicleRecords.find(item => item.nome === payload.veiculo);
+    const record = {
+      equipamento_id: selectedVehicle?.id || null,
+      nome_veiculo_snapshot: payload.veiculo || '',
+      nome_equipamento: payload.equipamento || '', placa: payload.placa || '',
+      data_inspecao: payload.dataInspecao || null, responsavel: payload.responsavel || '',
+      horimetro: payload.horimetroDesabilitado || payload.horimetro === '' ? null : Number(payload.horimetro),
+      horimetro_desabilitado: payload.horimetroDesabilitado,
+      quilometragem_km: payload.quilometragemDesabilitada || payload.quilometragem === '' ? null : Number(payload.quilometragem),
+      quilometragem_desabilitada: payload.quilometragemDesabilitada,
+      observacoes_nao_conformidade: payload.naoConformidade || '',
+      ordem_servico_necessaria: payload.ordemServico === 'sim', aptidao: payload.aptidaoSistema,
+      atualizado_por: currentUser.id
+    };
+    let inspectionId = existing?.id;
+    let result;
+    if (inspectionId) result = await supabaseClient.from('inspecoes').update(record).eq('id', inspectionId).select('id').single();
+    else result = await supabaseClient.from('inspecoes').insert({ ...record, criado_por: currentUser.id }).select('id').single();
+    if (result.error) return alert(`Não foi possível salvar a inspeção: ${result.error.message}`);
+    inspectionId = result.data.id;
+    const answers = Object.entries(payload.respostas).map(([codigo, situacao]) => {
+      const item = [...rfItems, ...rnfItems, ...getCustomItems()].find(candidate => candidate.id === codigo);
+      const catalogItem = checklistRecords.find(candidate => candidate.codigo === codigo);
+      return {
+        inspecao_id: inspectionId, item_checklist_id: catalogItem?.id || null,
+        codigo_item_snapshot: codigo, nome_item_snapshot: item?.name || codigo,
+        categoria_item_snapshot: item?.category || (rnfItems.some(candidate => candidate.id === codigo) ? 'rnf' : 'operacao'),
+        situacao
+      };
+    });
+    const { error: deleteError } = await supabaseClient.from('respostas_inspecao').delete().eq('inspecao_id', inspectionId);
+    if (deleteError) return alert(`A inspeção foi salva, mas as respostas não: ${deleteError.message}`);
+    if (answers.length) {
+      const { error } = await supabaseClient.from('respostas_inspecao').insert(answers);
+      if (error) return alert(`A inspeção foi salva, mas as respostas não: ${error.message}`);
+    }
+    const photoRows = [];
+    for (const [codigo, dataUrls] of Object.entries(appState.photos)) {
+      for (const [index, dataUrl] of dataUrls.entries()) {
+        if (!String(dataUrl).startsWith('data:')) continue;
+        const response = await fetch(dataUrl);
+        const blob = await response.blob();
+        const extension = blob.type.split('/')[1] || 'jpg';
+        const filename = `${crypto.randomUUID()}.${extension}`;
+        const caminho = `${inspectionId}/${filename}`;
+        const { error: uploadError } = await supabaseClient.storage.from('inspection-photos').upload(caminho, blob, {
+          contentType: blob.type, upsert: true
+        });
+        if (uploadError) return alert(`A inspeção foi salva, mas a foto ${index + 1} não: ${uploadError.message}`);
+        photoRows.push({ inspecao_id: inspectionId, codigo_item: codigo,
+          caminho_storage: caminho, nome_arquivo: filename, tipo_conteudo: blob.type,
+          tamanho_bytes: blob.size, enviado_por: currentUser.id });
+      }
+      appState.photos[codigo] = [];
+    }
+    if (photoRows.length) {
+      const { error } = await supabaseClient.from('fotos_inspecao').insert(photoRows);
+      if (error) return alert(`A inspeção foi salva, mas os metadados das fotos não: ${error.message}`);
+    }
+    payload.id = inspectionId;
+  }
   saveHistory(payload);
   localStorage.setItem('checklist-inspecao-v2', JSON.stringify(payload));
   saveAuditEntry('relatorio_salvo', {
@@ -775,7 +949,7 @@ async function saveInspection() {
     pdfLink.classList.remove('hidden');
     pdfLink.click();
 
-    alert('Inspeção salva e PDF gerado.');
+    alert('Inspeção salva no Supabase e PDF gerado.');
   } catch (error) {
     alert(`Inspeção salva no navegador, mas não foi possível gerar o PDF pelo servidor.\n${error.message}`);
   }
@@ -883,8 +1057,9 @@ async function openInspectionPdf() {
 
 function setAuthMode(mode) {
   const isRegister = mode === 'register';
-  document.getElementById('roleField').classList.toggle('hidden', !isRegister);
-  updateAdminContactFields('authPerfil', 'authAdminEmailField', 'authAdminPhoneField', 'authAdminEmail', 'authAdminPhone', isRegister);
+  document.getElementById('roleField').classList.add('hidden');
+  document.getElementById('authUsernameField').classList.toggle('hidden', !isRegister);
+  document.getElementById('authNomeUsuario').required = isRegister;
   const submitBtn = document.querySelector('.auth-submit');
   submitBtn.textContent = isRegister ? 'Cadastrar' : 'Entrar';
   document.querySelectorAll('.auth-tab').forEach(btn => {
@@ -911,35 +1086,6 @@ function getCurrentUser() {
   return raw ? JSON.parse(raw) : null;
 }
 
-function loginUser(username, password) {
-  const users = getUsers();
-  const user = users.find(item => item.username.toLowerCase() === username.toLowerCase() && item.password === password);
-  if (!user) {
-    return null;
-  }
-
-  const userSession = {
-    ...user,
-    loginAt: new Date().toISOString(),
-    logoutAt: null
-  };
-
-  localStorage.setItem(STORAGE_KEYS.currentUser, JSON.stringify(userSession));
-  saveAuditEntry('login', { loginAt: userSession.loginAt });
-  return userSession;
-}
-
-function registerUser(username, password, perfil, email = '', phone = '') {
-  const users = getUsers();
-  const existing = users.find(item => item.username.toLowerCase() === username.toLowerCase());
-  if (existing) {
-    return false;
-  }
-  users.push({ username, password, perfil, email, phone });
-  localStorage.setItem(STORAGE_KEYS.users, JSON.stringify(users));
-  return true;
-}
-
 function updateUserBadge() {
   const currentUser = JSON.parse(localStorage.getItem(STORAGE_KEYS.currentUser) || 'null');
   const badge = document.getElementById('userBadge');
@@ -948,19 +1094,12 @@ function updateUserBadge() {
   }
 }
 
-function logoutUser() {
+async function logoutUser() {
   const currentUser = getCurrentUser();
   const logoutAt = new Date().toISOString();
 
-  if (currentUser) {
-    const updatedUser = {
-      ...currentUser,
-      logoutAt,
-      lastSession: currentUser.loginAt || null
-    };
-    localStorage.setItem(STORAGE_KEYS.currentUser, JSON.stringify(updatedUser));
-    saveAuditEntry('logout', { logoutAt, loginAt: currentUser.loginAt || null });
-  }
+  if (currentUser) saveAuditEntry('logout', { logoutAt });
+  if (supabaseClient) await supabaseClient.auth.signOut();
 
   localStorage.removeItem(STORAGE_KEYS.currentUser);
   document.getElementById('appContent').classList.add('hidden');
@@ -979,8 +1118,8 @@ function ensureSession() {
     authPanel.classList.add('hidden');
     appContent.classList.remove('hidden');
     updateUserBadge();
-    document.getElementById('userManagement').classList.toggle('hidden', currentUser.perfil !== 'admin');
-    if (currentUser.perfil === 'admin') renderUserList();
+    document.getElementById('userManagement').classList.add('hidden');
+    document.querySelector('.management-panel').classList.toggle('hidden', currentUser.perfil !== 'admin');
   } else {
     authPanel.classList.remove('hidden');
     appContent.classList.add('hidden');
@@ -994,38 +1133,41 @@ function bindAuthEvents() {
 
   document.getElementById('authForm').addEventListener('submit', event => {
     event.preventDefault();
-    const username = document.getElementById('authUsuario').value.trim();
-    const password = document.getElementById('authSenha').value.trim();
+    const email = document.getElementById('authUsuario').value.trim();
+    const password = document.getElementById('authSenha').value;
     const mode = document.querySelector('.auth-tab.active')?.dataset.mode || 'login';
-
-    if (mode === 'register') {
-      const perfil = document.getElementById('authPerfil').value;
-      const email = document.getElementById('authAdminEmail').value.trim();
-      const phone = document.getElementById('authAdminPhone').value.trim();
-      if (registerUser(username, password, perfil, email, phone)) {
-        authMessage('Usuário cadastrado com sucesso. Faça login.');
-        setAuthMode('login');
-        document.getElementById('authForm').reset();
-      } else {
-        authMessage('Usuário já existe. Tente outro nome.', true);
-      }
-      return;
-    }
-
-    const user = loginUser(username, password);
-    if (!user) {
-      authMessage('Credenciais inválidas.', true);
-      return;
-    }
-
-    authMessage('Login realizado com sucesso!');
-    ensureSession();
+    const submit = document.querySelector('.auth-submit');
+    submit.disabled = true;
+    (async () => {
+      try {
+        if (!supabaseReady) throw new Error('Supabase ainda não está conectado.');
+        if (mode === 'register') {
+          const username = document.getElementById('authNomeUsuario').value.trim();
+          const phone = document.getElementById('authAdminPhone').value.trim();
+          const { data, error } = await supabaseClient.auth.signUp({
+            email, password, options: { data: { username, phone } }
+          });
+          if (error) throw error;
+          if (data.session) await applySession(data.session);
+          else {
+            authMessage('Conta criada. Confirme o e-mail para entrar.');
+            setAuthMode('login');
+          }
+        } else {
+          const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+          if (error) throw error;
+          await applySession(data.session);
+          saveAuditEntry('login', { timestamp: new Date().toISOString() });
+          authMessage('Login realizado com sucesso!');
+        }
+      } catch (error) {
+        authMessage(error.message || 'Não foi possível autenticar.', true);
+      } finally { submit.disabled = false; }
+    })();
   });
 
   document.getElementById('logoutBtn').addEventListener('click', logoutUser);
-  document.getElementById('authPerfil').addEventListener('change', () => {
-    updateAdminContactFields('authPerfil', 'authAdminEmailField', 'authAdminPhoneField', 'authAdminEmail', 'authAdminPhone', true);
-  });
+  document.getElementById('authPerfil').addEventListener('change', () => {});
   document.getElementById('editUserRole').addEventListener('change', () => {
     updateAdminContactFields('editUserRole', 'editAdminEmailField', 'editAdminPhoneField', 'editAdminEmail', 'editAdminPhone', true);
   });
@@ -1080,7 +1222,9 @@ loadSavedInspection();
 updateSummary();
 bindAuthEvents();
 setAuthMode('login');
-ensureSession();
+initializeSupabase().catch(error => {
+  authMessage(error.message || 'Não foi possível conectar ao Supabase.', true);
+});
 
 salvarChecklistBtn.addEventListener('click', saveInspection);
 exportPdfBtn.addEventListener('click', openInspectionPdf);

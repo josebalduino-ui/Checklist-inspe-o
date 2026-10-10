@@ -1,9 +1,6 @@
 -- Esquema inicial do Checklist de Inspeção para Supabase / PostgreSQL.
--- Execute no SQL Editor do Supabase. As senhas ficam exclusivamente no Supabase Auth.
+create extension if not exists pgcrypto with schema extensions;
 
-create extension if not exists pgcrypto;
-
--- Perfil associado ao usuário autenticado pelo Supabase Auth.
 create table if not exists public.perfis (
   id uuid primary key references auth.users (id) on delete cascade,
   nome_usuario text not null unique,
