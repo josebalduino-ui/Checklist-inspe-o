@@ -8,7 +8,7 @@ declare
   email_teste text := 'jose.balduino@mensa.org.br';
   perfil_id uuid;
 begin
-  select p.id
+  select p.idtestei
     into perfil_id
     from public.perfis p
     join auth.users u on u.id = p.id
